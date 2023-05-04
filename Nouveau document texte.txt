@@ -1,0 +1,22 @@
+def ouvrirmIP(self):
+        self.monIP = QtGui.QDialog()
+        fenetre=monIp.Ui_monIP()
+        fenetre.setupUi(self.monIP)
+        self.monIP.setWindowModality(QtCore.Qt.ApplicationModal)
+        self.monIP.exec_()
+        f=open("monIP.ip")
+        text=f.read()
+        if text!="":
+            self.actionEntrer_mon_IP.setEnabled(False)
+    def ouvrirsIP(self):
+         self.sonIP = QtGui.QDialog()
+         fenetre=sonIp.Ui_sonIP()
+         fenetre.setupUi(self.sonIP)
+         self.sonIP.exec_()
+         f=open("sonIP.ip")
+         text=f.read()
+         if text!="":
+            self.actionConnecter_a_un_ami.setEnabled(False)
+self.actionQuiter.triggered.connect(MainWindow.close)
+        self.actionEntrer_mon_IP.triggered.connect(self.ouvrirmIP)
+        self.actionConnecter_a_un_ami.triggered.connect(self.ouvrirsIP)
