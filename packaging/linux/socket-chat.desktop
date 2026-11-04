@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Socket Chat
+GenericName=Messagerie instantanée
+Comment=Discuter avec un collègue sur le réseau interne
+Exec=socket-chat
+Icon=socket-chat
+Terminal=false
+Categories=Network;InstantMessaging;Chat;
+Keywords=chat;messagerie;réseau;
+StartupWMClass=socket-chat
