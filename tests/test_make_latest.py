@@ -68,3 +68,24 @@ def test_main_checks_tag_against_package_version(tmp_path, capsys):
     assert written["version"] == __version__
     # Les notes de la version courante viennent du vrai CHANGELOG.
     assert written["notes"]
+
+
+def test_check_tag_only(capsys, monkeypatch):
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    assert make_latest.main(["--check-tag", f"v{__version__}"]) == 0
+    assert "conforme" in capsys.readouterr().out
+    assert make_latest.main(["--check-tag", "v99.0.0"]) == 1
+    captured = capsys.readouterr()
+    assert "ne correspond pas à la version du code" in captured.err
+    assert "git push origin --delete v99.0.0" in captured.err
+    assert "::error" not in captured.out
+
+
+def test_mismatch_is_annotated_in_github_actions(capsys, monkeypatch):
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    assert make_latest.main(["--check-tag", "v99.0.0"]) == 1
+    assert captured_line_starts(capsys.readouterr().out, "::error title=Version incohérente::")
+
+
+def captured_line_starts(output: str, prefix: str) -> bool:
+    return any(line.startswith(prefix) for line in output.splitlines())
