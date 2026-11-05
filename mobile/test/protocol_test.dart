@@ -7,25 +7,24 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:socket_chat_mobile/protocol/protocol.dart';
 
 Map<String, dynamic> loadVectors() =>
-    jsonDecode(File('test/fixtures/protocol_vectors.json').readAsStringSync())
-        as Map<String, dynamic>;
+    jsonDecode(File('test/fixtures/protocol_vectors.json').readAsStringSync()) as Map<String, dynamic>;
 
 Map<String, Object?> fieldsOf(Message m) => {
-      'type': m.type.wire,
-      'id': m.id,
-      'name': m.name,
-      'port': m.port,
-      'text': m.text,
-      'status': m.status?.wire,
-      'active': m.active,
-      'reason': m.reason,
-      'emoji': m.emoji,
-      'size': m.size,
-      'thumb': base64Encode(m.thumb ?? Uint8List(0)),
-      'offset': m.offset,
-      'data': base64Encode(m.data ?? Uint8List(0)),
-      'sha256': m.sha256,
-    };
+  'type': m.type.wire,
+  'id': m.id,
+  'name': m.name,
+  'port': m.port,
+  'text': m.text,
+  'status': m.status?.wire,
+  'active': m.active,
+  'reason': m.reason,
+  'emoji': m.emoji,
+  'size': m.size,
+  'thumb': base64Encode(m.thumb ?? Uint8List(0)),
+  'offset': m.offset,
+  'data': base64Encode(m.data ?? Uint8List(0)),
+  'sha256': m.sha256,
+};
 
 Message messageFromFields(Map<String, dynamic> f) {
   Uint8List? bytes(String key) {
@@ -73,8 +72,7 @@ void main() {
   test('trames invalides rejetées', () {
     for (final raw in vectors['invalid'] as List) {
       final line = base64Decode(raw as String);
-      expect(() => decode(line), throwsA(isA<ProtocolException>()),
-          reason: String.fromCharCodes(line));
+      expect(() => decode(line), throwsA(isA<ProtocolException>()), reason: String.fromCharCodes(line));
     }
   });
 
@@ -110,8 +108,7 @@ void main() {
     for (final raw in vectors['announce_invalid'] as List) {
       expect(() => decodeAnnounce(base64Decode(raw as String)), throwsA(isA<ProtocolException>()));
     }
-    final announce = decodeAnnounce(encodeAnnounce(
-        '6f1c2c1e-6a51-4f6a-9d3e-0c8b8a3c9b10', 'Bob', 12800));
+    final announce = decodeAnnounce(encodeAnnounce('6f1c2c1e-6a51-4f6a-9d3e-0c8b8a3c9b10', 'Bob', 12800));
     expect(announce.port, 12800);
     expect(decodeAnnounce(encodeLeave('6f1c2c1e-6a51-4f6a-9d3e-0c8b8a3c9b10')).leaving, isTrue);
   });
@@ -130,15 +127,15 @@ void main() {
     for (var i = 0; i < data.length; i += 7) {
       received.addAll(decoder.feed(data.sublist(i, i + 7 > data.length ? data.length : i + 7)));
     }
-    expect(received.map((m) => m.type),
-        [MessageType.hello, MessageType.chat, MessageType.bye]);
+    expect(received.map((m) => m.type), [MessageType.hello, MessageType.chat, MessageType.bye]);
     expect(received[1].text, 'é' * 50);
     expect(() => FrameDecoder().feed(Uint8List(maxFrameSize)), throwsA(isA<ProtocolException>()));
   });
 
   test('un bloc de fichier tient dans une trame', () {
-    final frame = encode(Message.fileChunk(
-        '6f1c2c1e-6a51-4f6a-9d3e-0c8b8a3c9b10', 0, Uint8List(chunkSize)..fillRange(0, chunkSize, 255)));
+    final frame = encode(
+      Message.fileChunk('6f1c2c1e-6a51-4f6a-9d3e-0c8b8a3c9b10', 0, Uint8List(chunkSize)..fillRange(0, chunkSize, 255)),
+    );
     expect(frame.length, lessThan(maxFrameSize));
   });
 }

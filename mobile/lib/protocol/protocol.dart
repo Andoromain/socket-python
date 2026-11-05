@@ -189,13 +189,10 @@ class Message {
 
   factory Message.hello(String userId, String name, int port) =>
       Message(MessageType.hello, id: userId, name: name, port: port);
-  factory Message.chat(String messageId, String text) =>
-      Message(MessageType.chat, id: messageId, text: text);
-  factory Message.ack(String messageId, AckStatus status) =>
-      Message(MessageType.ack, id: messageId, status: status);
+  factory Message.chat(String messageId, String text) => Message(MessageType.chat, id: messageId, text: text);
+  factory Message.ack(String messageId, AckStatus status) => Message(MessageType.ack, id: messageId, status: status);
   factory Message.typing(bool active) => Message(MessageType.typing, active: active);
-  factory Message.react(String messageId, String emoji) =>
-      Message(MessageType.react, id: messageId, emoji: emoji);
+  factory Message.react(String messageId, String emoji) => Message(MessageType.react, id: messageId, emoji: emoji);
   factory Message.fileOffer(String messageId, String name, int size, [Uint8List? thumb]) =>
       Message(MessageType.fileOffer, id: messageId, name: name, size: size, thumb: thumb);
   factory Message.fileAnswer(String messageId, bool accept) =>
@@ -240,8 +237,7 @@ class Message {
   }
 
   @override
-  bool operator ==(Object other) =>
-      other is Message && jsonEncode(other.toJson()) == jsonEncode(toJson());
+  bool operator ==(Object other) => other is Message && jsonEncode(other.toJson()) == jsonEncode(toJson());
 
   @override
   int get hashCode => jsonEncode(toJson()).hashCode;
@@ -277,16 +273,10 @@ Uint8List encode(Message message) {
   return frame;
 }
 
-Uint8List encodeAnnounce(String userId, String name, int port) => _dumps({
-      'type': 'announce',
-      'version': protocolVersion,
-      'id': userId,
-      'name': name,
-      'port': port,
-    });
+Uint8List encodeAnnounce(String userId, String name, int port) =>
+    _dumps({'type': 'announce', 'version': protocolVersion, 'id': userId, 'name': name, 'port': port});
 
-Uint8List encodeLeave(String userId) =>
-    _dumps({'type': 'leave', 'version': protocolVersion, 'id': userId});
+Uint8List encodeLeave(String userId) => _dumps({'type': 'leave', 'version': protocolVersion, 'id': userId});
 
 // -- Décodage -------------------------------------------------------------
 Map<String, Object?> _load(List<int> data) {
@@ -432,8 +422,7 @@ Announcement decodeAnnounce(List<int> datagram) {
   _checkVersion(payload);
   switch (payload['type']) {
     case 'announce':
-      return Announcement(_requireId(payload),
-          name: _requireName(payload), port: _requirePort(payload));
+      return Announcement(_requireId(payload), name: _requireName(payload), port: _requirePort(payload));
     case 'leave':
       return Announcement(_requireId(payload));
     default:

@@ -16,20 +16,20 @@ MessageRecord msg(int i, {String contact = a, bool outgoing = true, int? ts, Sta
     MessageRecord(mid(i), contact, outgoing, 'm$i', ts ?? i, status);
 
 MessageRecord fileMsg(int i, {FileState state = FileState.offered, String thumb = ''}) => MessageRecord(
-      mid(i),
-      a,
-      true,
-      '',
-      i,
-      Status.pending,
-      file: FileInfo(
-        thumb.isNotEmpty ? 'photo.png' : 'doc.pdf',
-        1234,
-        state,
-        '/tmp/x',
-        Uint8List.fromList(thumb.codeUnits),
-      ),
-    );
+  mid(i),
+  a,
+  true,
+  '',
+  i,
+  Status.pending,
+  file: FileInfo(
+    thumb.isNotEmpty ? 'photo.png' : 'doc.pdf',
+    1234,
+    state,
+    '/tmp/x',
+    Uint8List.fromList(thumb.codeUnits),
+  ),
+);
 
 void main() {
   late Directory tmp;

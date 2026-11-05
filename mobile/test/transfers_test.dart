@@ -67,10 +67,7 @@ void main() {
       bob.fileProgress.connect((p) => progress.add((p.$2, p.$3)));
       final destination = '${tmp.path}/reçu/rapport.bin';
       bob.acceptFile(record.id, destination);
-      expect(
-        [FileState.accepted, FileState.transferring, FileState.done],
-        contains(state(bob, record.id)),
-      );
+      expect([FileState.accepted, FileState.transferring, FileState.done], contains(state(bob, record.id)));
       await waitState(bob, record.id, FileState.done);
       await waitState(alice, record.id, FileState.done);
 

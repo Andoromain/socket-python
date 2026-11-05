@@ -89,8 +89,7 @@ enum FileState {
 }
 
 class FileInfo {
-  FileInfo(this.name, this.size, this.state, [this.path, Uint8List? thumb])
-      : thumb = thumb ?? Uint8List(0);
+  FileInfo(this.name, this.size, this.state, [this.path, Uint8List? thumb]) : thumb = thumb ?? Uint8List(0);
 
   final String name;
   final int size;
@@ -154,16 +153,8 @@ class MessageRecord {
     return '';
   }
 
-  MessageRecord withReactions(List<(String, String)> value) => MessageRecord(
-        id,
-        contactId,
-        outgoing,
-        text,
-        ts,
-        status,
-        file: file,
-        reactions: value,
-      );
+  MessageRecord withReactions(List<(String, String)> value) =>
+      MessageRecord(id, contactId, outgoing, text, ts, status, file: file, reactions: value);
 }
 
 class ContactSummary {
@@ -193,9 +184,7 @@ class Store {
     }
     _db.execute('PRAGMA user_version = $schemaVersion');
     // Un transfert ne survit pas à l'arrêt de l'application.
-    _db.execute(
-      "UPDATE messages SET file_state = 'failed' WHERE file_state IN ('accepted', 'transferring')",
-    );
+    _db.execute("UPDATE messages SET file_state = 'failed' WHERE file_state IN ('accepted', 'transferring')");
   }
 
   final Database _db;
@@ -324,9 +313,10 @@ class Store {
         chunk,
       );
       for (final row in rows) {
-        byMessage
-            .putIfAbsent(row['message_id'] as String, () => [])
-            .add((row['author'] as String, row['emoji'] as String));
+        byMessage.putIfAbsent(row['message_id'] as String, () => []).add((
+          row['author'] as String,
+          row['emoji'] as String,
+        ));
       }
     }
     return [
@@ -378,10 +368,9 @@ class Store {
 
   /// Marque comme lus les messages reçus ; renvoie les identifiants modifiés.
   List<String> markIncomingRead(String contactId) {
-    final rows = _db.select(
-      "SELECT id FROM messages WHERE contact_id = ? AND outgoing = 0 AND status != 'read'",
-      [contactId],
-    );
+    final rows = _db.select("SELECT id FROM messages WHERE contact_id = ? AND outgoing = 0 AND status != 'read'", [
+      contactId,
+    ]);
     final ids = [for (final row in rows) row.columnAt(0) as String];
     if (ids.isNotEmpty) {
       _transaction(() {
@@ -407,10 +396,7 @@ class Store {
     final newState = state ?? file.state;
     final newPath = path ?? file.path;
     if (newState == file.state && newPath == file.path) return false;
-    _db.execute(
-      'UPDATE messages SET file_state = ?, file_path = ? WHERE id = ?',
-      [newState.value, newPath, messageId],
-    );
+    _db.execute('UPDATE messages SET file_state = ?, file_path = ? WHERE id = ?', [newState.value, newPath, messageId]);
     return true;
   }
 
@@ -430,10 +416,8 @@ class Store {
     return true;
   }
 
-  int totalUnread() => _db
-      .select("SELECT COUNT(*) FROM messages WHERE outgoing = 0 AND status != 'read'")
-      .first
-      .columnAt(0) as int;
+  int totalUnread() =>
+      _db.select("SELECT COUNT(*) FROM messages WHERE outgoing = 0 AND status != 'read'").first.columnAt(0) as int;
 
   void _transaction(void Function() body) {
     _db.execute('BEGIN');
@@ -448,12 +432,12 @@ class Store {
 }
 
 Contact _contact(Row row) => Contact(
-      row['id'] as String,
-      row['name'] as String,
-      host: row['host'] as String?,
-      port: row['port'] as int?,
-      lastSeen: row['last_seen'] as int,
-    );
+  row['id'] as String,
+  row['name'] as String,
+  host: row['host'] as String?,
+  port: row['port'] as int?,
+  lastSeen: row['last_seen'] as int,
+);
 
 FileInfo? _file(Row row, [String prefix = '']) {
   if (row['${prefix}kind'] != 'file') return null;
@@ -467,11 +451,11 @@ FileInfo? _file(Row row, [String prefix = '']) {
 }
 
 MessageRecord _message(Row row) => MessageRecord(
-      row['id'] as String,
-      row['contact_id'] as String,
-      row['outgoing'] == 1,
-      row['text'] as String,
-      row['ts'] as int,
-      Status.parse(row['status'] as String),
-      file: _file(row),
-    );
+  row['id'] as String,
+  row['contact_id'] as String,
+  row['outgoing'] == 1,
+  row['text'] as String,
+  row['ts'] as int,
+  Status.parse(row['status'] as String),
+  file: _file(row),
+);

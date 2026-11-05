@@ -44,8 +44,7 @@ String describeSocketError(Object error) {
   return error.toString();
 }
 
-String _plainAddress(String address) =>
-    address.startsWith('::ffff:') ? address.substring(7) : address;
+String _plainAddress(String address) => address.startsWith('::ffff:') ? address.substring(7) : address;
 
 /// Connexion avec un pair, au-dessus d'une [RawSocket].
 ///

@@ -39,8 +39,8 @@ Uint8List _noThumbnail(String path) => Uint8List(0);
 
 class Messenger {
   Messenger(this.store, this.userId, String name, {this.thumbnailer = _noThumbnail})
-      : _name = validateName(name),
-        transfers = FileTransfers(store) {
+    : _name = validateName(name),
+      transfers = FileTransfers(store) {
     transfers.changed.connect(_onTransferChanged);
     transfers.progress.connect(fileProgress.emit);
   }
@@ -93,8 +93,7 @@ class Messenger {
   int? get port => _server?.port;
   bool get running => _server != null;
 
-  bool isOnline(String contactId) =>
-      _connections.containsKey(contactId) || _discovered.contains(contactId);
+  bool isOnline(String contactId) => _connections.containsKey(contactId) || _discovered.contains(contactId);
 
   bool isTyping(String contactId) => _typing.contains(contactId);
 
@@ -391,9 +390,7 @@ class Messenger {
         _receiveChat(conn, peerId, message);
       case MessageType.react:
         final record = store.message(message.id);
-        if (record != null &&
-            record.contactId == peerId &&
-            store.setReaction(message.id, peerId, message.emoji)) {
+        if (record != null && record.contactId == peerId && store.setReaction(message.id, peerId, message.emoji)) {
           messageChanged.emit(message.id);
         }
       case MessageType.fileAnswer || MessageType.fileChunk || MessageType.fileEnd || MessageType.fileCancel:
@@ -418,15 +415,7 @@ class Messenger {
     if (message.type == MessageType.fileOffer) {
       info = FileInfo(message.name, message.size, FileState.offered, null, message.thumb);
     }
-    final record = MessageRecord(
-      message.id,
-      peerId,
-      false,
-      message.text,
-      nowMs(),
-      Status.delivered,
-      file: info,
-    );
+    final record = MessageRecord(message.id, peerId, false, message.text, nowMs(), Status.delivered, file: info);
     bool inserted;
     try {
       inserted = store.addMessage(record);
@@ -512,10 +501,7 @@ class Messenger {
   void _setPeerTyping(String contactId, bool active) {
     if (active) {
       _typingTimers[contactId]?.cancel();
-      _typingTimers[contactId] = Timer(
-        Duration(milliseconds: typingTimeoutMs),
-        () => _setPeerTyping(contactId, false),
-      );
+      _typingTimers[contactId] = Timer(Duration(milliseconds: typingTimeoutMs), () => _setPeerTyping(contactId, false));
       if (_typing.add(contactId)) typingChanged.emit((contactId, true));
     } else if (_typing.remove(contactId)) {
       _typingTimers.remove(contactId)?.cancel();
@@ -531,8 +517,7 @@ class Messenger {
   }
 
   @visibleForTesting
-  void debugOnReady(PeerConnection conn, String peerId, String name, int port) =>
-      _onReady(conn, peerId, name, port);
+  void debugOnReady(PeerConnection conn, String peerId, String name, int port) => _onReady(conn, peerId, name, port);
 
   @visibleForTesting
   void debugOnClosed(PeerConnection conn, String reason) => _onClosed(conn, reason);

@@ -30,16 +30,16 @@ void emit(String event, [Map<String, Object?> fields = const {}]) {
 }
 
 Map<String, Object?> describe(MessageRecord record) => {
-      'id': record.id,
-      'contact': record.contactId,
-      'outgoing': record.outgoing,
-      'text': record.text,
-      'status': record.status.value,
-      'file': record.file == null
-          ? null
-          : {'name': record.file!.name, 'size': record.file!.size, 'state': record.file!.state.value},
-      'reactions': {for (final (author, emoji) in record.reactions) author: emoji},
-    };
+  'id': record.id,
+  'contact': record.contactId,
+  'outgoing': record.outgoing,
+  'text': record.text,
+  'status': record.status.value,
+  'file': record.file == null
+      ? null
+      : {'name': record.file!.name, 'size': record.file!.size, 'state': record.file!.state.value},
+  'reactions': {for (final (author, emoji) in record.reactions) author: emoji},
+};
 
 Future<void> main(List<String> args) async {
   final nameIndex = args.indexOf('--name');
@@ -60,51 +60,54 @@ Future<void> main(List<String> args) async {
 
   final done = Completer<void>();
   final lines = stdin.transform(utf8.decoder).transform(const LineSplitter());
-  final subscription = lines.listen((line) async {
-    if (line.trim().isEmpty) return;
-    final command = jsonDecode(line) as Map<String, Object?>;
-    try {
-      switch (command['cmd']) {
-        case 'connect':
-          messenger.addContact(command['host']! as String, command['port']! as int);
-        case 'send':
-          final record = messenger.send(command['to']! as String, command['text']! as String);
-          emit('result', {'id': record.id});
-        case 'send_file':
-          final record = messenger.sendFile(command['to']! as String, command['path']! as String);
-          emit('result', {'id': record.id});
-        case 'accept':
-          messenger.acceptFile(command['id']! as String, command['path']! as String);
-        case 'read':
-          messenger.markRead(command['contact']! as String);
-        case 'react':
-          messenger.react(command['id']! as String, command['emoji']! as String);
-        case 'typing':
-          messenger.setTyping(command['to']! as String, command['active']! as bool);
-        case 'discover':
-          final d = Discovery(
-            messenger.userId,
-            messenger.name,
-            messenger.port!,
-            udpPort: 0,
-            targets: [('127.0.0.1', command['target_port']! as int)],
-          );
-          await d.start();
-          messenger.attachDiscovery(d);
-          discovery = d;
-          emit('discovery', {'port': d.localPort});
-          d.announce();
-        case 'quit':
-          if (!done.isCompleted) done.complete();
-        default:
-          emit('error', {'message': 'Commande inconnue : ${command['cmd']}'});
+  final subscription = lines.listen(
+    (line) async {
+      if (line.trim().isEmpty) return;
+      final command = jsonDecode(line) as Map<String, Object?>;
+      try {
+        switch (command['cmd']) {
+          case 'connect':
+            messenger.addContact(command['host']! as String, command['port']! as int);
+          case 'send':
+            final record = messenger.send(command['to']! as String, command['text']! as String);
+            emit('result', {'id': record.id});
+          case 'send_file':
+            final record = messenger.sendFile(command['to']! as String, command['path']! as String);
+            emit('result', {'id': record.id});
+          case 'accept':
+            messenger.acceptFile(command['id']! as String, command['path']! as String);
+          case 'read':
+            messenger.markRead(command['contact']! as String);
+          case 'react':
+            messenger.react(command['id']! as String, command['emoji']! as String);
+          case 'typing':
+            messenger.setTyping(command['to']! as String, command['active']! as bool);
+          case 'discover':
+            final d = Discovery(
+              messenger.userId,
+              messenger.name,
+              messenger.port!,
+              udpPort: 0,
+              targets: [('127.0.0.1', command['target_port']! as int)],
+            );
+            await d.start();
+            messenger.attachDiscovery(d);
+            discovery = d;
+            emit('discovery', {'port': d.localPort});
+            d.announce();
+          case 'quit':
+            if (!done.isCompleted) done.complete();
+          default:
+            emit('error', {'message': 'Commande inconnue : ${command['cmd']}'});
+        }
+      } on ArgumentError catch (exc) {
+        emit('error', {'message': '${exc.message}'});
       }
-    } on ArgumentError catch (exc) {
-      emit('error', {'message': '${exc.message}'});
-    }
-  }, onDone: () {
-    if (!done.isCompleted) done.complete();
-  });
+    },
+    onDone: () {
+      if (!done.isCompleted) done.complete();
+    },
+  );
 
   await done.future;
   await subscription.cancel();

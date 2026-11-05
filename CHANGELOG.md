@@ -1,5 +1,27 @@
 # Journal des modifications
 
+## 3.3.0
+
+Compatible avec la 3.2 (même protocole) : rien ne change sur les postes Windows et Linux.
+
+### Ajouté
+- **Application Android** (dossier `mobile/`, Flutter) : un téléphone ou une tablette
+  sur le Wi-Fi de l'entreprise converse avec les postes Windows et Linux, sans serveur.
+  Même protocole, mêmes règles que la version PC :
+  - détection automatique des collègues sur le réseau, ajout par adresse ;
+  - bulles de conversation, coches ✓ ✓✓ ✓✓ bleues, « écrit… », séparateurs par jour,
+    gros emojis ;
+  - sélecteur d'emojis, émoticônes converties (`:)` → 🙂), réactions par appui long ;
+  - messages écrits hors ligne envoyés au retour du contact ;
+  - fichiers proposés par un PC affichés (nom, taille, aperçu des images), avec
+    refus possible ; la réception et l'envoi de fichiers arrivent dans la version
+    suivante, avec les notifications en arrière-plan et la mise à jour intégrée.
+- APK de test construit à chaque modification (onglet « Artifacts » de GitHub Actions).
+- Compatibilité garantie par des vecteurs de test partagés (encodage octet pour octet
+  des trames) et par un test d'interopérabilité où la version PC converse avec le cœur
+  de l'application Android : messages, accusés, réactions, fichiers de plusieurs Mo dans
+  les deux sens, détection UDP.
+
 ## 3.2.1
 
 Compatible avec la 3.2 (même protocole).

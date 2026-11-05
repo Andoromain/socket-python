@@ -186,10 +186,7 @@ void main() {
     expect(() => alice.send('inconnu', 'x'), throwsArgumentError);
     alice.store.upsertContact('11111111-1111-4111-8111-111111111111', 'Bob');
     expect(() => alice.send('11111111-1111-4111-8111-111111111111', '   '), throwsArgumentError);
-    expect(
-      () => alice.send('11111111-1111-4111-8111-111111111111', '🎉' * (maxTextLength + 1)),
-      throwsArgumentError,
-    );
+    expect(() => alice.send('11111111-1111-4111-8111-111111111111', '🎉' * (maxTextLength + 1)), throwsArgumentError);
   });
 
   test("une nouvelle adresse remplace une tentative vers l'ancienne", () async {

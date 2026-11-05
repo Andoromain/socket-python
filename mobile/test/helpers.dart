@@ -27,10 +27,13 @@ Future<T> next<T>(Signal<T> signal, {bool Function(T value)? where, Duration lim
     completer.complete(value);
   };
   signal.connect(listener);
-  return completer.future.timeout(limit, onTimeout: () {
-    signal.disconnect(listener);
-    throw TimeoutException('Signal non reçu en ${limit.inSeconds} s');
-  });
+  return completer.future.timeout(
+    limit,
+    onTimeout: () {
+      signal.disconnect(listener);
+      throw TimeoutException('Signal non reçu en ${limit.inSeconds} s');
+    },
+  );
 }
 
 Future<void> pause([int ms = 200]) => Future<void>.delayed(Duration(milliseconds: ms));

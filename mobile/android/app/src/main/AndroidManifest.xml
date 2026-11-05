@@ -1,6 +1,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Connexions TCP avec les collègues et détection par broadcast UDP. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- Sans verrou multicast, Android filtre le broadcast reçu (détection impossible). -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+
     <application
-        android:label="socket_chat_mobile"
+        android:label="Socket Chat"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
