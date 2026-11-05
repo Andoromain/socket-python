@@ -131,7 +131,7 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.me_label)
 
         # Conversation
-        self.conversation = ConversationView(self.messenger, self)
+        self.conversation = ConversationView(self.messenger, self.settings, self)
         self.conversation.message_error.connect(
             lambda text: QMessageBox.warning(self, APP_TITLE, text)
         )
@@ -270,7 +270,10 @@ class MainWindow(QMainWindow):
             return
         contact = self.messenger.store.contact(record.contact_id)
         name = contact.name if contact else "Nouveau message"
-        self.notify.emit(record.contact_id, name, " ".join(record.text.split()))
+        preview = record.preview
+        if record.file is not None:
+            preview = f"vous propose {record.file.name}"
+        self.notify.emit(record.contact_id, name, preview)
         QApplication.alert(self)
 
     def _is_attended(self) -> bool:

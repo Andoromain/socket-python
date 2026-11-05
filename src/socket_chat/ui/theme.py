@@ -227,3 +227,37 @@ def short_time(ts_ms: int, now: datetime | None = None) -> str:
 
 def clock(ts_ms: int) -> str:
     return datetime.fromtimestamp(ts_ms / 1000).strftime("%H:%M")
+
+
+# -- Fichiers -------------------------------------------------------------
+_FILE_COLORS = {
+    ("pdf",): "#d93025",
+    ("doc", "docx", "odt", "rtf", "txt", "md"): "#1a73e8",
+    ("xls", "xlsx", "ods", "csv"): "#188038",
+    ("ppt", "pptx", "odp"): "#e8710a",
+    ("zip", "7z", "rar", "tar", "gz"): "#9c6b00",
+    ("png", "jpg", "jpeg", "gif", "bmp", "webp", "svg"): "#8e24aa",
+    ("mp3", "wav", "ogg", "flac", "m4a"): "#00897b",
+    ("mp4", "avi", "mkv", "mov", "webm"): "#c2185b",
+    ("py", "js", "ts", "java", "c", "cpp", "cs", "html", "css", "json", "xml", "sql"): "#455a64",
+}
+
+
+def file_color(extension: str) -> QColor:
+    for extensions, color in _FILE_COLORS.items():
+        if extension in extensions:
+            return QColor(color)
+    return QColor("#78909c")
+
+
+def human_size(size: int) -> str:
+    """Taille lisible à la française : « 532 o », « 12 Ko », « 1,4 Mo »."""
+    if size < 1024:
+        return f"{size} o"
+    value = float(size)
+    for unit in ("Ko", "Mo", "Go"):
+        value /= 1024
+        if value < 1024 or unit == "Go":
+            text = f"{value:.0f}" if value >= 100 else f"{value:.1f}".rstrip("0").rstrip(".")
+            return f"{text.replace('.', ',')} {unit}"
+    raise AssertionError  # inatteignable
