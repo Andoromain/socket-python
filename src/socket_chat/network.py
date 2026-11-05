@@ -135,6 +135,7 @@ class PeerConnection(QObject):
     def send(self, message: Message) -> None:
         if not self.is_ready:
             raise RuntimeError("La connexion n'est pas établie.")
+        self._send_hello()  # notre présentation précède toujours toute autre trame
         self._write(message)
 
     def connect_to_host(self, host: str, port: int) -> None:
@@ -167,13 +168,19 @@ class PeerConnection(QObject):
         self._socket.write(encode(message))
 
     def _on_connected(self) -> None:
+        self._send_hello()
+
+    def _send_hello(self) -> None:
+        """Envoie notre présentation une seule fois (idempotent)."""
         if self._finished or self._hello_sent:
             return
         self._hello_sent = True
         self._connect_timer.stop()
         log.debug("Connecté à %s, envoi de la présentation", self.peer_address)
         self._write(self._hello)
-        self._handshake_timer.start()
+        if self._peer_id is None:
+            # Délai accordé au pair pour se présenter, s'il ne l'a pas déjà fait.
+            self._handshake_timer.start()
 
     def _on_ready_read(self) -> None:
         try:
@@ -193,6 +200,10 @@ class PeerConnection(QObject):
                 return  # présentation en double : ignorée
             self._handshake_timer.stop()
             self._peer_id, self._peer_name = message.id, message.name
+            # Sur une connexion acceptée, notre présentation est différée d'un tour de
+            # boucle : si celle du pair arrive avant, on l'envoie maintenant, avant que
+            # quoi que ce soit d'autre ne parte (le pair couperait la connexion).
+            self._send_hello()
             log.info("Pair prêt : %s (%s)", message.name, self.peer_address)
             self.ready.emit(message.id, message.name, message.port)
         elif message.type is MessageType.BYE:

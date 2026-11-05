@@ -1,5 +1,17 @@
 # Journal des modifications
 
+## 3.2.1
+
+Compatible avec la 3.2 (même protocole).
+
+### Corrigé
+- Connexion parfois coupée juste après l'arrivée d'un collègue (plus fréquent sous
+  Windows) : sur une connexion entrante, des données (messages en attente, réponse à
+  une offre de fichier, réactions) pouvaient partir avant notre présentation, et le pair
+  coupait alors la connexion ; les messages n'étaient renvoyés que 30 s plus tard. Dans
+  le même cas, un délai de présentation relancé à tort coupait la connexion au bout de
+  10 s. La présentation part désormais toujours en premier.
+
 ## 3.2.0
 
 Compatible avec la 3.1 (même protocole). Dernière mise à jour à installer à la main :
