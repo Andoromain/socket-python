@@ -12,18 +12,23 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 LINUX = ROOT / "packaging" / "linux"
 
+# Faux programme : une copie de perl, exécutable autonome qui fonctionne sous n'importe
+# quel nom (contrairement à sleep, qui est un binaire multi-commandes avec uutils).
+PERL = shutil.which("perl")
+SLEEP_ARGS = ["-e", "sleep 300"]
+
 pytestmark = pytest.mark.skipif(
-    not sys.platform.startswith("linux") or shutil.which("pgrep") is None,
-    reason="script propre à Linux",
+    not sys.platform.startswith("linux") or not shutil.which("pgrep") or not PERL,
+    reason="script propre à Linux (pgrep et perl requis)",
 )
 
 
 def make_bundle(tmp_path: Path, version: str) -> Path:
-    """Archive extraite factice : le « programme » est une copie de sleep."""
+    """Archive extraite factice : le « programme » est une copie de perl."""
     bundle = tmp_path / f"bundle-{version}"
     app = bundle / "socket-chat"
     app.mkdir(parents=True)
-    shutil.copy(shutil.which("sleep"), app / "socket-chat")
+    shutil.copy(PERL, app / "socket-chat")
     (app / "VERSION").write_text(version)
     for name in ("install.sh", "socket-chat.desktop"):
         shutil.copy(LINUX / name, bundle / name)
@@ -61,9 +66,10 @@ def test_install_update_and_uninstall(tmp_path):
     assert f"Exec={app_dir}/socket-chat" in desktop
 
     # L'application tourne (elle reste dans la zone de notification) pendant la mise à jour.
-    running = subprocess.Popen([str(app_dir / "socket-chat"), "300"])
+    running = subprocess.Popen([str(app_dir / "socket-chat"), *SLEEP_ARGS])
     try:
         time.sleep(0.2)
+        assert running.poll() is None, "le faux programme doit tourner"
         out = run_install(make_bundle(tmp_path, "3.1.1"), home)
         assert "mis à jour" in out and "relancez-le" in out
         running.wait(timeout=10)  # arrêtée par le script
@@ -91,10 +97,11 @@ def test_other_processes_named_socket_chat_are_left_alone(tmp_path):
     other_dir = tmp_path / "ailleurs"
     other_dir.mkdir()
     other = other_dir / "socket-chat"
-    shutil.copy(shutil.which("sleep"), other)
-    stranger = subprocess.Popen([str(other), "300"])
+    shutil.copy(PERL, other)
+    stranger = subprocess.Popen([str(other), *SLEEP_ARGS])
     try:
         time.sleep(0.2)
+        assert stranger.poll() is None, "le faux programme doit tourner"
         out = run_install(make_bundle(tmp_path, "3.1.1"), home)
         assert "relancez-le" not in out
         assert stranger.poll() is None  # pas installé par ce script : non touché
