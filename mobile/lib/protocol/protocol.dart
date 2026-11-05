@@ -10,6 +10,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:uuid/uuid.dart';
+
 const int protocolVersion = 3;
 const int defaultPort = 12800;
 const int discoveryPort = 12801;
@@ -87,6 +89,11 @@ enum AckStatus {
     return null;
   }
 }
+
+const Uuid _uuidGenerator = Uuid();
+
+/// Nouvel identifiant (UUID v4 canonique), pour un utilisateur ou un message.
+String newId() => _uuidGenerator.v4();
 
 int runeLength(String text) => text.runes.length;
 
