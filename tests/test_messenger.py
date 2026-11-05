@@ -140,14 +140,43 @@ def test_unreachable_address_reports_error(qtbot, make_messenger):
     assert "Impossible de joindre" in blocker.args[0]
 
 
-def test_connecting_to_self_is_ignored(qtbot, make_messenger):
+def test_connecting_to_self_is_explained(qtbot, make_messenger):
     alice = make_messenger("Alice")
     errors = []
     alice.error.connect(errors.append)
     alice.add_contact("127.0.0.1", alice.port)
     qtbot.wait(300)
     assert alice.store.contacts() == []
-    assert errors == []
+    assert errors == [messenger_module.SELF_ERROR]
+
+
+@pytest.mark.parametrize("bye_first", [False, True])
+def test_self_connection_error_whatever_the_event_order(make_messenger, bye_first):
+    """Sous Windows, le « bye » de l'autre extrémité peut arriver avant le « hello »."""
+    alice = make_messenger("Alice", start=False)
+    errors = []
+    alice.error.connect(errors.append)
+
+    class FakeConn:
+        outgoing = True
+        peer_id = None
+        peer_address = "127.0.0.1"
+
+        def close(self, reason=""):
+            pass
+
+        def deleteLater(self):  # noqa: N802 - API Qt
+            pass
+
+    conn = FakeConn()
+    alice._manual.add(conn)
+    alice._pending.add(conn)
+    if bye_first:
+        alice._on_closed(conn, messenger_module.SELF_REASON)
+    else:
+        alice._on_ready(conn, alice.user_id, "Alice", 1)
+        alice._on_closed(conn, messenger_module.SELF_REASON)
+    assert errors == [messenger_module.SELF_ERROR]
 
 
 def test_port_in_use_reports_error(qtbot, make_messenger):
@@ -164,3 +193,23 @@ def test_send_validation(make_messenger):
     alice.store.upsert_contact("11111111-1111-4111-8111-111111111111", "Bob")
     with pytest.raises(ValueError):
         alice.send("11111111-1111-4111-8111-111111111111", "   ")
+
+
+def test_new_address_replaces_stale_connection_attempt(qtbot, make_messenger):
+    """Régression : une tentative vers une ancienne adresse ne doit pas bloquer la nouvelle.
+
+    Sous Windows, une connexion refusée met ~2 s à échouer ; ici, un serveur qui
+    accepte sans jamais répondre simule une tentative qui traîne.
+    """
+    black_hole = QTcpServer()
+    assert black_hole.listen(QHostAddress(QHostAddress.SpecialAddress.LocalHost), 0)
+    alice, bob = make_messenger("Alice"), make_messenger("Bob")
+    alice.store.upsert_contact(bob.user_id, "Bob", host="127.0.0.1", port=black_hole.serverPort())
+    record = alice.send(bob.user_id, "Tu es là ?")  # tentative vers l'ancienne adresse
+    assert bob.user_id in alice._dialing
+
+    with qtbot.waitSignal(bob.message_added, timeout=2000) as blocker:
+        alice.on_peer_seen(bob.user_id, "Bob", "127.0.0.1", bob.port)
+    assert blocker.args[0].id == record.id
+    black_hole.close()
+    black_hole.deleteLater()

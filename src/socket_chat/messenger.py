@@ -37,6 +37,8 @@ TYPING_TIMEOUT_MS = 6_000
 RETRY_INTERVAL_MS = 30_000
 
 DUPLICATE_REASON = "duplicate"
+SELF_REASON = "self"
+SELF_ERROR = "Cette adresse est celle de votre propre poste."
 
 _ACK_TO_STATUS = {AckStatus.DELIVERED: Status.DELIVERED, AckStatus.READ: Status.READ}
 
@@ -202,7 +204,15 @@ class Messenger(QObject):
     def on_peer_seen(self, contact_id: str, name: str, host: str, port: int) -> None:
         if contact_id == self.user_id:
             return
+        previous = self.store.contact(contact_id)
         self.store.upsert_contact(contact_id, name, host=host, port=port, last_seen=now_ms())
+        moved = previous is not None and (previous.host, previous.port) != (host, port)
+        stale = self._dialing.get(contact_id)
+        if moved and stale is not None:
+            # Tentative en cours vers l'ancienne adresse (qui peut traîner plusieurs
+            # secondes sous Windows) : on l'abandonne pour la nouvelle.
+            stale.abort("Adresse obsolète")
+            self.connect_to(contact_id)
         if contact_id not in self._discovered:
             was_online = self.is_online(contact_id)
             self._discovered.add(contact_id)
@@ -246,12 +256,15 @@ class Messenger(QObject):
 
     def _on_ready(self, conn: PeerConnection, peer_id: str, name: str, port: int) -> None:
         self._pending.discard(conn)
+        manual = conn in self._manual
         self._manual.discard(conn)
         if self._dialing.get(peer_id) is conn:
             del self._dialing[peer_id]
         if peer_id == self.user_id:
             log.info("Connexion à soi-même ignorée")
-            conn.close()
+            conn.close(SELF_REASON)
+            if manual:
+                self.error.emit(SELF_ERROR)
             return
 
         existing = self._connections.get(peer_id)
@@ -324,8 +337,13 @@ class Messenger(QObject):
                 del self._dialing[contact_id]
                 log.info("Contact %s injoignable : %s", contact_id, reason or "fermé")
         if conn in self._manual:
+            # Selon l'ordre des événements (variable selon le système), l'autre extrémité
+            # d'une connexion à soi-même peut fermer avant d'avoir reçu notre présentation.
             self._manual.discard(conn)
-            self.error.emit(f"Impossible de joindre ce poste : {reason or 'connexion fermée.'}")
+            if reason == SELF_REASON:
+                self.error.emit(SELF_ERROR)
+            else:
+                self.error.emit(f"Impossible de joindre ce poste : {reason or 'connexion fermée.'}")
         peer_id = conn.peer_id
         if peer_id is not None and self._connections.get(peer_id) is conn:
             del self._connections[peer_id]
