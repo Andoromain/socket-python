@@ -28,6 +28,11 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--debug", action="store_true", help="journalisation détaillée")
+    parser.add_argument(
+        "--update",
+        action="store_true",
+        help="vérifier tout de suite les mises à jour et installer sans demander",
+    )
     # Les options propres à Qt (-platform, -style…) sont transmises telles quelles.
     args, qt_args = parser.parse_known_args(argv)
     args.qt_args = qt_args
@@ -73,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:
     from .store import Store
     from .ui.main_window import MainWindow
     from .ui.tray import Tray
+    from .ui.updates import UpdateBanner, UpdateController
 
     QApplication.setOrganizationName(ORGANIZATION)
     QApplication.setApplicationName(APPLICATION)
@@ -125,6 +131,11 @@ def main(argv: list[str] | None = None) -> int:
         log.warning("Détection automatique indisponible : ajout par adresse uniquement")
 
     window = MainWindow(settings, messenger, discovery)
+    banner = UpdateBanner(window)
+    window.add_banner(banner)
+    updates = UpdateController(settings, messenger, banner, window)
+    window.help_menu.insertAction(window.help_menu.actions()[0], updates.menu_action(window))
+    updates.quit_requested.connect(window.request_quit)
 
     tray = None
     if Tray.available():
@@ -150,6 +161,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
 
         window.hidden_to_tray.connect(on_hidden)
+        updates.notify.connect(tray.info)
         window.update_unread()  # état initial de l'icône
 
     local_server.newConnection.connect(
@@ -157,6 +169,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     def shutdown() -> None:
+        updates.stop()
         discovery.stop()
         messenger.stop()
         if tray is not None:
@@ -167,6 +180,10 @@ def main(argv: list[str] | None = None) -> int:
     app.aboutToQuit.connect(shutdown)
 
     window.show()
+    if args.update:
+        updates.auto_install = True
+        updates.checker.check_now()
+    updates.start()
     if not settings.has_name and not window.edit_settings(first_run=True):
         settings.name = settings.name  # mémorise le nom proposé par défaut
 

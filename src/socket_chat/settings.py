@@ -11,6 +11,7 @@ import getpass
 from PySide6.QtCore import QByteArray, QSettings
 
 from .protocol import DEFAULT_PORT, MAX_NAME_LENGTH, is_valid_id, new_id, validate_name
+from .updater import DEFAULT_UPDATE_URL
 
 MAX_RECENT_HOSTS = 10
 MAX_RECENT_EMOJIS = 24
@@ -69,6 +70,33 @@ class Settings:
     def remember_host(self, host: str) -> None:
         hosts = [h for h in self.recent_hosts if h != host]
         self._store.setValue("network/recent_hosts", [host, *hosts][:MAX_RECENT_HOSTS])
+
+    # -- Mises à jour ------------------------------------------------------
+    # Ces clés peuvent aussi être fixées par l'administrateur pour tous les utilisateurs
+    # (QSettings lit en repli HKLM\Software\SocketChat sous Windows, /etc/xdg sous Linux).
+    @property
+    def update_url(self) -> str:
+        return self._store.value("update/url", "", str) or DEFAULT_UPDATE_URL
+
+    @property
+    def update_enabled(self) -> bool:
+        return self._store.value("update/enabled", True, bool)
+
+    @property
+    def skipped_version(self) -> str:
+        return self._store.value("update/skipped", "", str)
+
+    @skipped_version.setter
+    def skipped_version(self, value: str) -> None:
+        self._store.setValue("update/skipped", value)
+
+    @property
+    def notified_version(self) -> str:
+        return self._store.value("update/notified", "", str)
+
+    @notified_version.setter
+    def notified_version(self, value: str) -> None:
+        self._store.setValue("update/notified", value)
 
     @property
     def recent_emojis(self) -> list[str]:
