@@ -13,6 +13,7 @@ from PySide6.QtCore import QByteArray, QSettings
 from .protocol import DEFAULT_PORT, MAX_NAME_LENGTH, is_valid_id, new_id, validate_name
 
 MAX_RECENT_HOSTS = 10
+MAX_RECENT_EMOJIS = 24
 
 
 def default_name() -> str:
@@ -68,6 +69,17 @@ class Settings:
     def remember_host(self, host: str) -> None:
         hosts = [h for h in self.recent_hosts if h != host]
         self._store.setValue("network/recent_hosts", [host, *hosts][:MAX_RECENT_HOSTS])
+
+    @property
+    def recent_emojis(self) -> list[str]:
+        value = self._store.value("emoji/recent", [])
+        if isinstance(value, str):
+            value = [value]
+        return [str(e) for e in value or [] if str(e)]
+
+    def remember_emoji(self, emoji: str) -> None:
+        recent = [e for e in self.recent_emojis if e != emoji]
+        self._store.setValue("emoji/recent", [emoji, *recent][:MAX_RECENT_EMOJIS])
 
     @property
     def close_to_tray(self) -> bool:

@@ -23,6 +23,7 @@ class Role(IntEnum):
     ONLINE = Qt.ItemDataRole.UserRole + 3
     TYPING = Qt.ItemDataRole.UserRole + 4
     ITEM = Qt.ItemDataRole.UserRole + 5
+    PROGRESS = Qt.ItemDataRole.UserRole + 6
 
 
 # -- Contacts -------------------------------------------------------------
@@ -109,6 +110,7 @@ class MessageListModel(QAbstractListModel):
         super().__init__(parent)
         self._items: list[DayItem | MessageItem] = []
         self._rows_by_id: dict[str, int] = {}
+        self._progress: dict[str, tuple[int, int]] = {}
         self.contact_id: str | None = None
 
     # -- Remplissage -----------------------------------------------------
@@ -117,6 +119,7 @@ class MessageListModel(QAbstractListModel):
         self.contact_id = contact_id
         self._items = []
         self._rows_by_id = {}
+        self._progress = {}
         for record in records:
             self._push(record)
         self.endResetModel()
@@ -143,6 +146,28 @@ class MessageListModel(QAbstractListModel):
         record = replace(item.record, status=Status(status))
         self._items[row] = replace(item, record=record)
         self.dataChanged.emit(self.index(row), self.index(row))
+
+    def update_record(self, record: MessageRecord) -> None:
+        """Remplace un message affiché (réactions, état du fichier…)."""
+        row = self._rows_by_id.get(record.id)
+        if row is None:
+            return
+        item = self._items[row]
+        assert isinstance(item, MessageItem)
+        self._items[row] = replace(item, record=record)
+        if record.file is None or not record.file.state.active:
+            self._progress.pop(record.id, None)
+        self.dataChanged.emit(self.index(row), self.index(row))
+
+    def set_progress(self, message_id: str, done: int, total: int) -> None:
+        row = self._rows_by_id.get(message_id)
+        if row is None:
+            return
+        self._progress[message_id] = (done, total)
+        self.dataChanged.emit(self.index(row), self.index(row), [Role.PROGRESS])
+
+    def row_of(self, message_id: str) -> int | None:
+        return self._rows_by_id.get(message_id)
 
     def _last_message_row(self) -> int | None:
         for row in range(len(self._items) - 1, -1, -1):
@@ -180,4 +205,6 @@ class MessageListModel(QAbstractListModel):
             return item.record.text
         if role == Role.ID and isinstance(item, MessageItem):
             return item.record.id
+        if role == Role.PROGRESS and isinstance(item, MessageItem):
+            return self._progress.get(item.record.id)
         return None

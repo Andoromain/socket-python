@@ -61,6 +61,7 @@ class PeerConnection(QObject):
     ready = Signal(str, str, int)  # identifiant, nom et port d'écoute du pair
     message_received = Signal(object)  # Message (hors hello et bye)
     closed = Signal(str)  # motif lisible ; chaîne vide = fermeture normale
+    bytes_written = Signal()  # des données ont quitté la file d'envoi (contrôle de flux)
 
     def __init__(
         self,
@@ -97,6 +98,7 @@ class PeerConnection(QObject):
         socket.readyRead.connect(self._on_ready_read)
         socket.disconnected.connect(self._on_disconnected)
         socket.errorOccurred.connect(self._on_error)
+        socket.bytesWritten.connect(lambda _n: self.bytes_written.emit())
 
         if socket.state() == QAbstractSocket.SocketState.ConnectedState:
             # Côté serveur : la socket est déjà connectée. La présentation est
@@ -119,6 +121,11 @@ class PeerConnection(QObject):
     @property
     def peer_address(self) -> str:
         return self._socket.peerAddress().toString()
+
+    @property
+    def pending_bytes(self) -> int:
+        """Octets en attente d'envoi (pour ne pas saturer la mémoire lors d'un transfert)."""
+        return self._socket.bytesToWrite()
 
     @property
     def is_ready(self) -> bool:

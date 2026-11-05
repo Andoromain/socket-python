@@ -9,6 +9,10 @@ central :
 - messages en **bulles**, indications **« écrit… »**, accusés **✓ envoyé, ✓✓ remis,
   ✓✓ bleu lu** ;
 - un message écrit à un collègue absent lui est **remis à son retour** ;
+- **emojis** (sélecteur avec recherche, `:)` → 🙂) et **réactions** sur les messages
+  (👍 ❤️ 😂…) ;
+- **envoi de fichiers et d'images** (bouton 📎, glisser-déposer, Ctrl+V d'une capture) :
+  le destinataire voit un aperçu et accepte ou refuse ;
 - **notifications** et compteur de non-lus dans la zone de notification, où
   l'application reste active quand on ferme la fenêtre.
 
@@ -18,6 +22,8 @@ clair ou sombre selon le système.
 | Thème clair | Thème sombre |
 |---|---|
 | ![Capture en thème clair](docs/capture-clair.png) | ![Capture en thème sombre](docs/capture-sombre.png) |
+
+<p align="center"><img src="docs/emojis.png" alt="Sélecteur d'emojis" width="370"></p>
 
 ## Installation
 
@@ -72,6 +78,10 @@ ou, sans pipx, `pip install --user <url ou chemin du dépôt>`. Cela fournit la 
 | Collègue d'un autre réseau (VPN, autre site) | **Ajouter par adresse…** (`Ctrl+N`) : saisir son adresse, affichée en bas de *sa* liste de contacts |
 | Rechercher un collègue | `Ctrl+F` |
 | Envoyer / aller à la ligne | `Entrée` / `Maj+Entrée` |
+| Insérer un emoji | Bouton 🙂 (recherche en français : « merci », « café »…) ou raccourcis `:)` `:D` `;)` `<3` `(y)`… convertis à l'envoi |
+| Réagir à un message | Survoler la bulle puis cliquer sur 🙂, ou clic droit › **Réagir**. Recliquer sur sa réaction la retire |
+| Envoyer un fichier | Bouton 📎, glisser-déposer dans la conversation, ou `Ctrl+V` (fichier copié ou capture d'écran) |
+| Recevoir un fichier | **Accepter** (on choisit où l'enregistrer) ou **Refuser** dans la bulle ; puis **Ouvrir** / **Dossier** |
 | Copier un message | Clic droit sur la bulle |
 | Changer de nom, de port, le comportement à la fermeture | **Socket Chat › Préférences…** |
 | Quitter vraiment | **Socket Chat › Quitter** (`Ctrl+Q`) ou clic droit sur l'icône de notification |
@@ -82,7 +92,14 @@ ou, sans pipx, `pip install --user <url ou chemin du dépôt>`. Cela fournit la 
   dessus ouvre la conversation.
 - Relancer Socket Chat alors qu'il tourne déjà réaffiche simplement la fenêtre.
 - Un message envoyé à un collègue hors ligne est conservé (🕓) et lui est remis
-  automatiquement dès qu'il revient.
+  automatiquement dès qu'il revient. Une proposition de fichier aussi ; le transfert
+  lui-même nécessite que les deux postes soient en ligne.
+- Les fichiers (jusqu'à 2 Go) ne sont jamais enregistrés sans l'accord du destinataire.
+  Une barre de progression s'affiche pendant le transfert, que chacun peut annuler.
+  L'intégrité est vérifiée à l'arrivée (SHA-256) ; en cas de coupure, **Réessayer**
+  relance le transfert.
+- Les images collées sont conservées dans le dossier de données de l'application
+  (`envois`) pour pouvoir être renvoyées.
 
 ### Réseau
 
@@ -116,6 +133,10 @@ Conçu pour un **réseau interne de confiance** :
 - Les données reçues sont validées : taille limitée (10 000 caractères par message,
   64 Kio par trame), JSON strict, texte affiché sans interprétation HTML. Toute donnée
   invalide coupe la connexion.
+- Fichiers : rien n'est écrit sur le disque sans acceptation ; le nom proposé est
+  nettoyé (aucun chemin, aucun caractère interdit sous Windows) et l'utilisateur choisit
+  l'emplacement. Un fichier reçu n'est jamais ouvert automatiquement : traitez les
+  pièces jointes inattendues avec la même prudence qu'un courriel.
 
 ## Développement
 
@@ -147,31 +168,44 @@ src/socket_chat/
 ├── store.py          historique SQLite (contacts, messages, états) : pur Python
 ├── network.py        PeerConnection : une connexion TCP avec présentation mutuelle
 ├── messenger.py      Messenger : écoute, une connexion par contact, file d'envoi, accusés
+├── transfers.py      transferts de fichiers : contrôle de flux, SHA-256, annulation
 ├── discovery.py      Discovery : annonces UDP et détection des collègues
 ├── settings.py       préférences utilisateur (QSettings)
-├── ui/               fenêtre, modèles, délégués (bulles), zone de notification
+├── ui/               fenêtre, modèles, délégués (bulles), emojis, zone de notification
 └── resources/        icônes (SVG ; PNG/ICO générés par scripts/make_icons.py)
 ```
 
 Tout repose sur la boucle d'événements Qt : aucun thread, les signaux de `Messenger`
 sont reliés directement à l'interface.
 
-### Protocole (version 2)
+### Protocole (version 3)
 
 Une trame TCP est un objet JSON UTF-8 sur une ligne, terminé par `\n` :
 
 ```json
-{"type": "hello", "version": 2, "id": "<uuid>", "name": "Alice", "port": 12800}
+{"type": "hello", "version": 3, "id": "<uuid>", "name": "Alice", "port": 12800}
 {"type": "chat", "id": "<uuid du message>", "text": "Bonjour\nça va ?"}
 {"type": "ack", "id": "<uuid du message>", "status": "delivered"}
 {"type": "typing", "active": true}
+{"type": "react", "id": "<uuid du message>", "emoji": "👍"}
+{"type": "file_offer", "id": "<uuid>", "name": "rapport.pdf", "size": 2400000, "thumb": "<base64>"}
+{"type": "file_answer", "id": "<uuid>", "accept": true}
+{"type": "file_chunk", "id": "<uuid>", "offset": 0, "data": "<base64, 32 Kio>"}
+{"type": "file_end", "id": "<uuid>", "sha256": "<empreinte>"}
+{"type": "file_cancel", "id": "<uuid>", "reason": ""}
 {"type": "bye", "reason": ""}
 ```
 
+Les blocs de fichier sont envoyés au rythme où la connexion se vide (jamais plus de
+512 Kio en attente), si bien que la conversation reste fluide pendant un transfert et
+qu'un gros fichier n'est jamais chargé en mémoire.
+
 Chaque pair envoie `hello` dès la connexion et doit recevoir celui de l'autre sous
 10 secondes. Les annonces UDP (`announce`, `leave`) portent la même version. Une version
-différente est refusée : tous les postes doivent passer à la même version majeure
-(la 3.x ne communique pas avec la 2.x).
+différente est refusée : tous les postes doivent utiliser la même version du protocole
+(la 3.1 ne communique ni avec la 3.0 ni avec la 2.x). Les trames d'un type inconnu
+sont désormais ignorées : les prochaines nouveautés n'imposeront plus de mise à jour
+simultanée.
 
 ### Publier une version
 

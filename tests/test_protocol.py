@@ -3,7 +3,9 @@ import json
 import pytest
 
 from socket_chat.protocol import (
+    CHUNK_SIZE,
     MAX_DATAGRAM_SIZE,
+    MAX_FILE_NAME_LENGTH,
     MAX_FRAME_SIZE,
     MAX_TEXT_LENGTH,
     PROTOCOL_VERSION,
@@ -19,6 +21,7 @@ from socket_chat.protocol import (
     encode_leave,
     is_valid_id,
     new_id,
+    safe_file_name,
     validate_name,
 )
 
@@ -35,6 +38,17 @@ UID = "6f1c2c1e-6a51-4f6a-9d3e-0c8b8a3c9b10"
         Message.ack(UID, AckStatus.READ),
         Message.typing(True),
         Message.typing(False),
+        Message.react(UID, "👍"),
+        Message.react(UID, "❤️"),
+        Message.react(UID, ""),
+        Message.file_offer(UID, "rapport final.pdf", 123456),
+        Message.file_offer(UID, "photo.jpg", 9, b"\xff\xd8jpeg"),
+        Message.file_answer(UID, True),
+        Message.file_answer(UID, False),
+        Message.file_chunk(UID, 0, b""),
+        Message.file_chunk(UID, CHUNK_SIZE, bytes(range(256)) * (CHUNK_SIZE // 256)),
+        Message.file_end(UID, "a" * 64),
+        Message.file_cancel(UID, "annulé"),
         Message.bye("au revoir"),
     ],
 )
@@ -83,7 +97,8 @@ def _hello(**changes):
         b"not json",
         b"\xff\xfe",
         b"[1, 2]",
-        b'{"type": "unknown"}',
+        b'{"type": 3}',
+        b'{"pas": "de type"}',
         _hello(version=1),
         _hello(version=True),
         _hello(id="pas-un-uuid"),
@@ -97,6 +112,19 @@ def _hello(**changes):
         json.dumps({"type": "chat", "id": UID, "text": "x" * (MAX_TEXT_LENGTH + 1)}).encode(),
         json.dumps({"type": "ack", "id": UID, "status": "lost"}).encode(),
         json.dumps({"type": "typing", "active": "yes"}).encode(),
+        json.dumps({"type": "react", "id": UID, "emoji": "texte"}).encode(),
+        json.dumps({"type": "react", "id": UID, "emoji": "👍" * 20}).encode(),
+        json.dumps({"type": "file_offer", "id": UID, "name": "a", "size": -1}).encode(),
+        json.dumps({"type": "file_offer", "id": UID, "name": "a", "size": 3 * 1024**3}).encode(),
+        json.dumps(
+            {"type": "file_offer", "id": UID, "name": "a", "size": 1, "thumb": "%%"}
+        ).encode(),
+        json.dumps({"type": "file_answer", "id": UID, "accept": "oui"}).encode(),
+        json.dumps(
+            {"type": "file_chunk", "id": UID, "offset": 0, "data": "pas du base64!"}
+        ).encode(),
+        json.dumps({"type": "file_chunk", "id": UID, "offset": -5, "data": ""}).encode(),
+        json.dumps({"type": "file_end", "id": UID, "sha256": "zz"}).encode(),
     ],
 )
 def test_decode_rejects_invalid_frames(line):
@@ -142,3 +170,43 @@ def test_validate_name():
         validate_name(" ")
     with pytest.raises(ValueError):
         validate_name("x" * 33)
+
+
+def test_unknown_frame_types_are_ignored():
+    """Une version plus récente peut ajouter des trames sans couper la connexion."""
+    assert decode(b'{"type": "sticker", "id": "x"}') is None
+    frames = b'{"type":"future"}\n' + encode(Message.typing(True))
+    assert FrameDecoder().feed(frames) == [Message.typing(True)]
+
+
+def test_chunk_frames_fit_in_frame_limit():
+    frame = encode(Message.file_chunk(UID, 0, b"\xff" * CHUNK_SIZE))
+    assert len(frame) < MAX_FRAME_SIZE
+
+
+def test_received_file_names_are_sanitized():
+    line = json.dumps(
+        {"type": "file_offer", "id": UID, "name": "..\\..\\Windows/system32/evil:.exe", "size": 1}
+    ).encode()
+    assert decode(line).name == "evil_.exe"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("rapport.pdf", "rapport.pdf"),
+        ("../../etc/passwd", "passwd"),
+        ("C:\\Users\\x\\photo.png", "photo.png"),
+        ('a<b>c:d"e|f?g*.txt', "a_b_c_d_e_f_g_.txt"),
+        ("...", "fichier"),
+        ("", "fichier"),
+        ("nul\x00.txt", "nul_.txt"),
+    ],
+)
+def test_safe_file_name(raw, expected):
+    assert safe_file_name(raw) == expected
+
+
+def test_safe_file_name_keeps_extension_when_truncating():
+    name = safe_file_name("x" * 500 + ".docx")
+    assert len(name) == MAX_FILE_NAME_LENGTH and name.endswith(".docx")
