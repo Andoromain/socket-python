@@ -1,5 +1,28 @@
 # Journal des modifications
 
+## 3.1.0
+
+**Protocole version 3** : incompatible avec la 3.0 et la 2.x, mettre à jour tous les
+postes. Les trames d'un type inconnu sont désormais ignorées, ce qui évitera ce genre
+de mise à jour simultanée à l'avenir.
+
+### Ajouté
+- **Emojis** : sélecteur (catégories, recherche en français, récents), conversion des
+  émoticônes (`:)` → 🙂, `<3` → ❤️…) à l'envoi, affichage agrandi des messages
+  composés de 1 à 3 emojis.
+- **Réactions** sur les messages (👍 ❤️ 😂 😮 😢 🙏 ou n'importe quel emoji) au survol
+  ou par clic droit, visibles des deux côtés ; envoyées au retour du contact s'il est
+  hors ligne.
+- **Envoi de fichiers** (jusqu'à 2 Go) par le bouton 📎, glisser-déposer ou `Ctrl+V` :
+  le destinataire accepte (en choisissant l'emplacement) ou refuse ; progression,
+  annulation des deux côtés, vérification SHA-256, reprise après coupure.
+- **Images** : aperçu dans la bulle avant même l'acceptation ; une capture d'écran
+  collée est envoyée directement.
+
+### Modifié
+- Historique : schéma SQLite version 2 (fichiers, réactions), migration automatique
+  des bases de la 3.0.
+
 ## 3.0.0
 
 Socket Chat devient une vraie messagerie. **Incompatible avec la 2.x** (protocole
