@@ -1,5 +1,17 @@
 # Journal des modifications
 
+## 3.1.1
+
+Compatible avec la 3.1.0 (même protocole) : pas besoin de mettre tous les postes à
+jour en même temps.
+
+### Amélioré
+- **Mise à jour par-dessus une version installée** : l'installeur Windows ferme
+  lui-même Socket Chat s'il est ouvert (même caché dans la zone de notification, et
+  aussi en installation silencieuse) ; le script Linux arrête l'instance ouverte et
+  indique « mis à jour ». Préférences et historique sont conservés.
+- README : section « Mettre à jour ».
+
 ## 3.1.0
 
 **Protocole version 3** : incompatible avec la 3.0 et la 2.x, mettre à jour tous les

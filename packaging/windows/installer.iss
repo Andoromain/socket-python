@@ -25,6 +25,11 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 ArchitecturesAllowed=x64compatible
+; Mise à jour par-dessus une version existante : Socket Chat reste souvent actif dans la
+; zone de notification. L'installeur le ferme lui-même (de force s'il ne répond pas),
+; y compris en installation silencieuse.
+CloseApplications=force
+RestartApplications=no
 
 [Languages]
 Name: "french"; MessagesFile: "compiler:Languages\French.isl"

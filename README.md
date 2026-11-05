@@ -70,6 +70,24 @@ pipx install git+https://github.com/andoajpr2/socket-python.git
 ou, sans pipx, `pip install --user <url ou chemin du dépôt>`. Cela fournit la commande
 `socket-chat`.
 
+### Mettre à jour
+
+Il suffit d'**installer la nouvelle version par-dessus l'ancienne**, sans désinstaller :
+
+| Installation d'origine | Mise à jour |
+|---|---|
+| Windows (installeur) | Lancer le nouveau `socket-chat-<version>-windows-setup.exe` (même mode : utilisateur ou tous les utilisateurs). Si Socket Chat est ouvert, même caché dans la zone de notification, l'installeur le ferme lui-même. |
+| Linux (archive) | Extraire la nouvelle archive et relancer son `install.sh` : l'instance ouverte est arrêtée, puis remplacée. |
+| pipx | `pipx install --force git+https://github.com/andoajpr2/socket-python.git` (quitter Socket Chat avant). |
+
+Le nom, le port, l'identifiant et l'**historique des conversations sont conservés** :
+ils sont stockés dans le profil de l'utilisateur, pas avec le programme. L'historique est
+converti automatiquement si le format change.
+
+> Après une mise à jour qui change la version du protocole (indiqué dans le
+> [journal des modifications](CHANGELOG.md), par exemple 3.0 → 3.1), **tous les postes
+> doivent être mis à jour** : les versions différentes ne communiquent pas entre elles.
+
 ## Utilisation
 
 | Action | Comment |
