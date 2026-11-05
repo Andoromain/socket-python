@@ -34,6 +34,8 @@ log = logging.getLogger(__name__)
 CONNECT_TIMEOUT_MS = 10_000
 #: Délai maximal pour recevoir la présentation (« hello ») du pair (ms).
 HANDSHAKE_TIMEOUT_MS = 10_000
+#: Délai maximal accordé à une fermeture polie avant de couper la connexion (ms).
+CLOSE_TIMEOUT_MS = 3_000
 
 BUSY_REASON = "busy"
 
@@ -89,6 +91,10 @@ class PeerConnection(QObject):
         self._handshake_timer.timeout.connect(
             lambda: self._fail("Le correspondant ne s'est pas présenté à temps.")
         )
+        # Minuteurs enfants de cette connexion : ils sont détruits avec elle, ce qui
+        # évite qu'un QTimer.singleShot ne touche une socket déjà supprimée.
+        self._close_timer = QTimer(self, singleShot=True, interval=CLOSE_TIMEOUT_MS)
+        self._close_timer.timeout.connect(self._on_close_timeout)
 
         socket.connected.connect(self._on_connected)
         socket.readyRead.connect(self._on_ready_read)
@@ -96,8 +102,11 @@ class PeerConnection(QObject):
         socket.errorOccurred.connect(self._on_error)
 
         if socket.state() == QAbstractSocket.SocketState.ConnectedState:
-            # Côté serveur : la socket est déjà connectée.
-            QTimer.singleShot(0, self._on_connected)
+            # Côté serveur : la socket est déjà connectée. La présentation est
+            # différée pour laisser l'appelant brancher ses signaux.
+            self._start_timer = QTimer(self, singleShot=True, interval=0)
+            self._start_timer.timeout.connect(self._on_connected)
+            self._start_timer.start()
 
     # -- Propriétés ------------------------------------------------------
     @property
@@ -128,7 +137,8 @@ class PeerConnection(QObject):
             self._socket.disconnectFromHost()
             # disconnectFromHost peut terminer immédiatement ou plus tard ;
             # on borne l'attente pour ne jamais rester bloqué.
-            QTimer.singleShot(3000, self._socket.abort)
+            if not self._finished:
+                self._close_timer.start()
         else:
             self._socket.abort()
             self._finish(reason)
@@ -179,6 +189,10 @@ class PeerConnection(QObject):
             self._close_reason = message.reason
             self._socket.disconnectFromHost()
 
+    def _on_close_timeout(self) -> None:
+        log.debug("Fermeture polie trop longue, connexion coupée")
+        self.abort(self._close_reason)
+
     def _fail(self, reason: str) -> None:
         if self._finished:
             return
@@ -199,6 +213,7 @@ class PeerConnection(QObject):
             return
         self._finished = True
         self._handshake_timer.stop()
+        self._close_timer.stop()
         log.info("Connexion terminée (%s)", reason or "normale")
         self.closed.emit(reason)
 
@@ -296,8 +311,9 @@ class ChatSession(QObject):
             self._server.deleteLater()
             self._server = None
         if self._peer is not None:
+            # Une fois self._peer remis à None, _on_peer_closed ignore cette connexion :
+            # inutile de déconnecter le signal.
             peer, self._peer = self._peer, None
-            peer.closed.disconnect(self._on_peer_closed)
             name = peer.peer_name
             peer.closed.connect(peer.deleteLater)
             peer.close()
