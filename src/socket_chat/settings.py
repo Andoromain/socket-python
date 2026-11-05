@@ -10,7 +10,7 @@ import getpass
 
 from PySide6.QtCore import QByteArray, QSettings
 
-from .protocol import DEFAULT_PORT, MAX_NAME_LENGTH, validate_name
+from .protocol import DEFAULT_PORT, MAX_NAME_LENGTH, is_valid_id, new_id, validate_name
 
 MAX_RECENT_HOSTS = 10
 
@@ -25,6 +25,15 @@ def default_name() -> str:
 class Settings:
     def __init__(self, store: QSettings | None = None) -> None:
         self._store = store if store is not None else QSettings()
+
+    @property
+    def user_id(self) -> str:
+        """Identifiant stable de l'utilisateur sur ce poste (créé au premier lancement)."""
+        value = self._store.value("user/id", "", str)
+        if not is_valid_id(value):
+            value = new_id()
+            self._store.setValue("user/id", value)
+        return value
 
     @property
     def has_name(self) -> bool:
@@ -59,6 +68,31 @@ class Settings:
     def remember_host(self, host: str) -> None:
         hosts = [h for h in self.recent_hosts if h != host]
         self._store.setValue("network/recent_hosts", [host, *hosts][:MAX_RECENT_HOSTS])
+
+    @property
+    def close_to_tray(self) -> bool:
+        return self._store.value("window/close_to_tray", True, bool)
+
+    @close_to_tray.setter
+    def close_to_tray(self, value: bool) -> None:
+        self._store.setValue("window/close_to_tray", bool(value))
+
+    @property
+    def tray_hint_shown(self) -> bool:
+        return self._store.value("window/tray_hint_shown", False, bool)
+
+    @tray_hint_shown.setter
+    def tray_hint_shown(self, value: bool) -> None:
+        self._store.setValue("window/tray_hint_shown", bool(value))
+
+    @property
+    def splitter_state(self) -> QByteArray | None:
+        value = self._store.value("window/splitter")
+        return value if isinstance(value, QByteArray) else None
+
+    @splitter_state.setter
+    def splitter_state(self, value: QByteArray) -> None:
+        self._store.setValue("window/splitter", value)
 
     @property
     def window_geometry(self) -> QByteArray | None:
