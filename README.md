@@ -4,7 +4,7 @@ Messagerie instantanée **de poste à poste** pour le réseau interne : un coll�
 héberge la conversation, l'autre la rejoint avec l'adresse IP ou le nom du poste.
 Pas de serveur central, rien n'est stocké.
 
-Fonctionne sous **Windows** et **Linux** (Python ≥ 3.10, Qt 6 via PySide6).
+Fonctionne sous **Windows** et **Linux** (Python ≥ 3.12, Qt 6 via PySide6).
 
 ![Capture d'écran](docs/capture.png)
 

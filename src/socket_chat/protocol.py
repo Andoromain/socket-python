@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 PROTOCOL_VERSION = 1
 DEFAULT_PORT = 12800
@@ -34,7 +34,7 @@ class ProtocolError(Exception):
     """Trame invalide reçue ou impossible à encoder."""
 
 
-class MessageType(str, Enum):
+class MessageType(StrEnum):
     HELLO = "hello"
     CHAT = "chat"
     BYE = "bye"
