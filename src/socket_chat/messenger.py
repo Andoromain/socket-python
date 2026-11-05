@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import time
+from pathlib import Path
 
 from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtNetwork import QHostAddress, QTcpServer, QTcpSocket
@@ -17,15 +18,18 @@ from PySide6.QtNetwork import QHostAddress, QTcpServer, QTcpSocket
 from .discovery import Discovery
 from .network import PeerConnection
 from .protocol import (
+    MAX_EMOJI_LENGTH,
     MAX_TEXT_LENGTH,
     AckStatus,
     Message,
     MessageType,
     ProtocolError,
     new_id,
+    safe_file_name,
     validate_name,
 )
-from .store import MessageRecord, Status, Store, now_ms
+from .store import ME, FileInfo, FileState, MessageRecord, Status, Store, now_ms
+from .transfers import FileTransfers, check_sendable, make_thumbnail
 
 log = logging.getLogger(__name__)
 
@@ -47,6 +51,8 @@ class Messenger(QObject):
     contacts_changed = Signal()  # liste, aperçus ou compteurs à rafraîchir
     message_added = Signal(object)  # MessageRecord
     message_status_changed = Signal(str, str)  # identifiant du message, Status
+    message_changed = Signal(str)  # réactions ou état du fichier modifiés
+    file_progress = Signal(str, int, int)  # identifiant, octets transférés, taille
     typing_changed = Signal(str, bool)  # contact, en train d'écrire
     presence_changed = Signal(str, bool)  # contact, en ligne
     error = Signal(str)
@@ -65,6 +71,13 @@ class Messenger(QObject):
         self._typing_timers: dict[str, QTimer] = {}
         self._typing: set[str] = set()  # contacts en train d'écrire
         self._typing_sent: dict[str, tuple[bool, float]] = {}
+        # Envois en attente d'une connexion : réactions et refus de fichiers.
+        self._pending_reactions: dict[str, dict[str, str]] = {}
+        self._pending_declines: dict[str, set[str]] = {}
+
+        self.transfers = FileTransfers(store, self)
+        self.transfers.changed.connect(self._on_transfer_changed)
+        self.transfers.progress.connect(self.file_progress)
 
         self._retry_timer = QTimer(self, interval=RETRY_INTERVAL_MS)
         self._retry_timer.timeout.connect(self._retry_undelivered)
@@ -116,6 +129,7 @@ class Messenger(QObject):
     def stop(self) -> None:
         """Ferme toutes les connexions et arrête l'écoute."""
         self._retry_timer.stop()
+        self.transfers.stop()
         if self._server is not None:
             self._server.close()
             self._server.deleteLater()
@@ -156,6 +170,80 @@ class Messenger(QObject):
         else:
             self.connect_to(contact_id)
         return record
+
+    def send_file(self, contact_id: str, path: str | Path) -> MessageRecord:
+        """Propose un fichier au contact (aperçu inclus pour une image)."""
+        if self.store.contact(contact_id) is None:
+            raise ValueError("Contact inconnu.")
+        path = Path(path).resolve()
+        size = check_sendable(path)
+        info = FileInfo(
+            safe_file_name(path.name), size, FileState.OFFERED, str(path), make_thumbnail(path)
+        )
+        record = MessageRecord(new_id(), contact_id, True, "", now_ms(), Status.PENDING, info)
+        self.store.add_message(record)
+        self.message_added.emit(record)
+        self.contacts_changed.emit()
+        conn = self._connections.get(contact_id)
+        if conn is not None:
+            self._transmit(conn, record)
+        else:
+            self.connect_to(contact_id)
+        return record
+
+    def accept_file(self, message_id: str, destination: str | Path) -> None:
+        """Accepte un fichier reçu et l'enregistre à ``destination``."""
+        record = self.store.message(message_id)
+        if record is None or record.file is None or record.outgoing:
+            raise ValueError("Fichier inconnu.")
+        if record.file.state not in (FileState.OFFERED, FileState.FAILED):
+            raise ValueError("Ce fichier n'est plus disponible.")
+        conn = self._connections.get(record.contact_id)
+        if conn is None:
+            contact = self.store.contact(record.contact_id)
+            name = contact.name if contact else "L'expéditeur"
+            raise ValueError(
+                f"{name} n'est pas connecté : réessayez quand il sera de nouveau en ligne."
+            )
+        try:
+            self.transfers.accept(message_id, Path(destination), conn)
+        except OSError as exc:
+            raise ValueError(f"Impossible d'écrire dans {destination} : {exc}") from exc
+
+    def decline_file(self, message_id: str) -> None:
+        record = self.store.message(message_id)
+        if record is None or record.file is None or record.outgoing:
+            return
+        if record.file.state is not FileState.OFFERED:
+            return
+        if self.store.update_file(message_id, state=FileState.DECLINED):
+            self.message_changed.emit(message_id)
+        conn = self._connections.get(record.contact_id)
+        if conn is not None:
+            conn.send(Message.file_answer(message_id, False))
+        else:
+            self._pending_declines.setdefault(record.contact_id, set()).add(message_id)
+
+    def cancel_file(self, message_id: str) -> None:
+        """Annule un fichier proposé ou un transfert en cours (des deux côtés)."""
+        record = self.store.message(message_id)
+        if record is None or record.file is None:
+            return
+        self.transfers.cancel(message_id, self._connections.get(record.contact_id))
+
+    def react(self, message_id: str, emoji: str) -> None:
+        """Pose une réaction sur un message (``""`` la retire)."""
+        if len(emoji) > MAX_EMOJI_LENGTH:
+            raise ValueError("Réaction invalide.")
+        record = self.store.message(message_id)
+        if record is None or not self.store.set_reaction(message_id, ME, emoji):
+            return
+        self.message_changed.emit(message_id)
+        conn = self._connections.get(record.contact_id)
+        if conn is not None:
+            conn.send(Message.react(message_id, emoji))
+        else:
+            self._pending_reactions.setdefault(record.contact_id, {})[message_id] = emoji
 
     def mark_read(self, contact_id: str) -> None:
         """Marque la conversation comme lue et prévient l'expéditeur."""
@@ -253,6 +341,7 @@ class Messenger(QObject):
         conn.ready.connect(lambda pid, name, port, c=conn: self._on_ready(c, pid, name, port))
         conn.message_received.connect(lambda msg, c=conn: self._on_message(c, msg))
         conn.closed.connect(lambda reason, c=conn: self._on_closed(c, reason))
+        conn.bytes_written.connect(lambda c=conn: self.transfers.pump(c))
 
     def _on_ready(self, conn: PeerConnection, peer_id: str, name: str, port: int) -> None:
         self._pending.discard(conn)
@@ -291,14 +380,33 @@ class Messenger(QObject):
         self.contacts_changed.emit()
         for record in self.store.undelivered_outgoing(peer_id):
             self._transmit(conn, record)
+        for message_id, emoji in self._pending_reactions.pop(peer_id, {}).items():
+            conn.send(Message.react(message_id, emoji))
+        for message_id in self._pending_declines.pop(peer_id, set()):
+            conn.send(Message.file_answer(message_id, False))
 
     def _on_message(self, conn: PeerConnection, message: Message) -> None:
         peer_id = conn.peer_id
         if peer_id is None or self._connections.get(peer_id) is not conn:
             return
         match message.type:
-            case MessageType.CHAT:
+            case MessageType.CHAT | MessageType.FILE_OFFER:
                 self._receive_chat(conn, peer_id, message)
+            case MessageType.REACT:
+                record = self.store.message(message.id)
+                if (
+                    record is not None
+                    and record.contact_id == peer_id
+                    and self.store.set_reaction(message.id, peer_id, message.emoji)
+                ):
+                    self.message_changed.emit(message.id)
+            case (
+                MessageType.FILE_ANSWER
+                | MessageType.FILE_CHUNK
+                | MessageType.FILE_END
+                | MessageType.FILE_CANCEL
+            ):
+                self.transfers.handle(conn, peer_id, message)
             case MessageType.ACK:
                 record = self.store.message(message.id)
                 if record is None or not record.outgoing or record.contact_id != peer_id:
@@ -312,7 +420,12 @@ class Messenger(QObject):
                 self._set_peer_typing(peer_id, message.active)
 
     def _receive_chat(self, conn: PeerConnection, peer_id: str, message: Message) -> None:
-        record = MessageRecord(message.id, peer_id, False, message.text, now_ms(), Status.DELIVERED)
+        info = None
+        if message.type is MessageType.FILE_OFFER:
+            info = FileInfo(message.name, message.size, FileState.OFFERED, None, message.thumb)
+        record = MessageRecord(
+            message.id, peer_id, False, message.text, now_ms(), Status.DELIVERED, info
+        )
         try:
             inserted = self.store.add_message(record)
         except Exception:
@@ -331,6 +444,7 @@ class Messenger(QObject):
 
     def _on_closed(self, conn: PeerConnection, reason: str) -> None:
         conn.deleteLater()
+        self.transfers.connection_closed(conn)
         self._pending.discard(conn)
         for contact_id, dialing in list(self._dialing.items()):
             if dialing is conn:
@@ -354,13 +468,22 @@ class Messenger(QObject):
             self.contacts_changed.emit()
 
     def _transmit(self, conn: PeerConnection, record: MessageRecord) -> None:
+        if record.file is not None:
+            f = record.file
+            frame = Message.file_offer(record.id, f.name, f.size, f.thumb)
+        else:
+            frame = Message.chat(record.id, record.text)
         try:
-            conn.send(Message.chat(record.id, record.text))
+            conn.send(frame)
         except (RuntimeError, ProtocolError) as exc:
             log.warning("Envoi impossible : %s", exc)
             return
         if self.store.update_status(record.id, Status.SENT):
             self.message_status_changed.emit(record.id, Status.SENT.value)
+
+    def _on_transfer_changed(self, message_id: str) -> None:
+        self.message_changed.emit(message_id)
+        self.contacts_changed.emit()
 
     def _retry_undelivered(self) -> None:
         for contact_id in self.store.contacts_with_undelivered():

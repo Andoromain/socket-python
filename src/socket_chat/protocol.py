@@ -14,7 +14,18 @@ lignes.
 * ``{"type": "ack", "id": "<uuid>", "status": "delivered" | "read"}`` :
   accusé de réception ou de lecture d'un message ;
 * ``{"type": "typing", "active": true}`` : le pair est en train d'écrire ;
+* ``{"type": "react", "id": "<uuid>", "emoji": "👍"}`` : réaction à un message
+  (``""`` la retire) ;
+* ``{"type": "file_offer", "id": "<uuid>", "name": "rapport.pdf", "size": 1234,
+  "thumb": "<base64>"}`` : proposition de fichier (aperçu JPEG facultatif) ;
+* ``{"type": "file_answer", "id": "<uuid>", "accept": true}`` : réponse du destinataire ;
+* ``{"type": "file_chunk", "id": "<uuid>", "offset": 0, "data": "<base64>"}`` : un bloc ;
+* ``{"type": "file_end", "id": "<uuid>", "sha256": "<hex>"}`` : fin et empreinte ;
+* ``{"type": "file_cancel", "id": "<uuid>", "reason": "..."}`` : abandon (des deux côtés) ;
 * ``{"type": "bye", "reason": "..."}`` : fermeture volontaire.
+
+Les trames d'un type inconnu sont ignorées : une version plus récente peut ajouter
+des fonctions sans couper la connexion avec les anciennes.
 
 Détection (UDP)
 ---------------
@@ -26,12 +37,15 @@ Datagrammes JSON (sans ``\\n``) diffusés sur le réseau local :
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
+import re
 import uuid
 from dataclasses import dataclass
 from enum import StrEnum
 
-PROTOCOL_VERSION = 2
+PROTOCOL_VERSION = 3
 DEFAULT_PORT = 12800
 DISCOVERY_PORT = 12801
 
@@ -43,6 +57,16 @@ MAX_DATAGRAM_SIZE = 1024
 MAX_TEXT_LENGTH = 10_000
 #: Longueur maximale d'un nom d'utilisateur (caractères).
 MAX_NAME_LENGTH = 32
+#: Taille maximale d'un fichier transféré (octets).
+MAX_FILE_SIZE = 2 * 1024**3
+#: Taille d'un bloc de fichier avant encodage base64 (octets).
+CHUNK_SIZE = 32 * 1024
+#: Taille maximale de l'aperçu d'une image (octets, avant base64).
+MAX_THUMB_SIZE = 32 * 1024
+#: Longueur maximale d'un nom de fichier (caractères).
+MAX_FILE_NAME_LENGTH = 200
+#: Longueur maximale d'une réaction (caractères : un emoji composé peut en compter plusieurs).
+MAX_EMOJI_LENGTH = 16
 
 
 class ProtocolError(Exception):
@@ -54,6 +78,12 @@ class MessageType(StrEnum):
     CHAT = "chat"
     ACK = "ack"
     TYPING = "typing"
+    REACT = "react"
+    FILE_OFFER = "file_offer"
+    FILE_ANSWER = "file_answer"
+    FILE_CHUNK = "file_chunk"
+    FILE_END = "file_end"
+    FILE_CANCEL = "file_cancel"
     BYE = "bye"
 
 
@@ -86,6 +116,24 @@ def validate_name(name: str) -> str:
     return name
 
 
+_UNSAFE_FILE_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f\x7f]')
+
+
+def safe_file_name(name: str) -> str:
+    """Nom de fichier sans chemin ni caractère interdit (Windows compris)."""
+    name = re.split(r"[\\/]", name)[-1]
+    name = _UNSAFE_FILE_CHARS.sub("_", name).strip().strip(".")
+    if not name:
+        return "fichier"
+    if len(name) > MAX_FILE_NAME_LENGTH:
+        stem, dot, ext = name.rpartition(".")
+        if dot and 0 < len(ext) <= 16:
+            name = stem[: MAX_FILE_NAME_LENGTH - len(ext) - 1] + "." + ext
+        else:
+            name = name[:MAX_FILE_NAME_LENGTH]
+    return name
+
+
 @dataclass(frozen=True)
 class Message:
     type: MessageType
@@ -96,6 +144,12 @@ class Message:
     status: AckStatus | None = None
     active: bool = False
     reason: str = ""
+    emoji: str = ""
+    size: int = 0
+    thumb: bytes = b""
+    offset: int = 0
+    data: bytes = b""
+    sha256: str = ""
 
     # -- Constructeurs ---------------------------------------------------
     @classmethod
@@ -115,8 +169,36 @@ class Message:
         return cls(MessageType.TYPING, active=active)
 
     @classmethod
+    def react(cls, message_id: str, emoji: str) -> Message:
+        return cls(MessageType.REACT, id=message_id, emoji=emoji)
+
+    @classmethod
+    def file_offer(cls, message_id: str, name: str, size: int, thumb: bytes = b"") -> Message:
+        return cls(MessageType.FILE_OFFER, id=message_id, name=name, size=size, thumb=thumb)
+
+    @classmethod
+    def file_answer(cls, message_id: str, accept: bool) -> Message:
+        return cls(MessageType.FILE_ANSWER, id=message_id, active=accept)
+
+    @classmethod
+    def file_chunk(cls, message_id: str, offset: int, data: bytes) -> Message:
+        return cls(MessageType.FILE_CHUNK, id=message_id, offset=offset, data=data)
+
+    @classmethod
+    def file_end(cls, message_id: str, sha256: str) -> Message:
+        return cls(MessageType.FILE_END, id=message_id, sha256=sha256)
+
+    @classmethod
+    def file_cancel(cls, message_id: str, reason: str = "") -> Message:
+        return cls(MessageType.FILE_CANCEL, id=message_id, reason=reason)
+
+    @classmethod
     def bye(cls, reason: str = "") -> Message:
         return cls(MessageType.BYE, reason=reason)
+
+    @property
+    def accept(self) -> bool:
+        return self.active
 
     # -- Sérialisation ---------------------------------------------------
     def to_dict(self) -> dict[str, object]:
@@ -137,6 +219,27 @@ class Message:
                 return {"type": kind, "id": self.id, "status": self.status.value}
             case MessageType.TYPING:
                 return {"type": kind, "active": self.active}
+            case MessageType.REACT:
+                return {"type": kind, "id": self.id, "emoji": self.emoji}
+            case MessageType.FILE_OFFER:
+                payload: dict[str, object] = {
+                    "type": kind,
+                    "id": self.id,
+                    "name": self.name,
+                    "size": self.size,
+                }
+                if self.thumb:
+                    payload["thumb"] = base64.b64encode(self.thumb).decode("ascii")
+                return payload
+            case MessageType.FILE_ANSWER:
+                return {"type": kind, "id": self.id, "accept": self.active}
+            case MessageType.FILE_CHUNK:
+                data = base64.b64encode(self.data).decode("ascii")
+                return {"type": kind, "id": self.id, "offset": self.offset, "data": data}
+            case MessageType.FILE_END:
+                return {"type": kind, "id": self.id, "sha256": self.sha256}
+            case MessageType.FILE_CANCEL:
+                return {"type": kind, "id": self.id, "reason": self.reason}
             case _:
                 return {"type": kind, "reason": self.reason}
 
@@ -213,6 +316,31 @@ def _require_port(payload: dict[str, object]) -> int:
     return value
 
 
+def _require_int(payload: dict[str, object], key: str, *, maximum: int) -> int:
+    value = payload.get(key)
+    if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= maximum:
+        raise ProtocolError(f"Champ « {key} » invalide.")
+    return value
+
+
+def _require_bool(payload: dict[str, object], key: str) -> bool:
+    value = payload.get(key)
+    if not isinstance(value, bool):
+        raise ProtocolError(f"Champ « {key} » invalide.")
+    return value
+
+
+def _require_base64(payload: dict[str, object], key: str, *, max_size: int) -> bytes:
+    raw = _require_str(payload, key, max_length=(max_size + 2) // 3 * 4)
+    try:
+        return base64.b64decode(raw, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ProtocolError(f"Champ « {key} » invalide.") from exc
+
+
+_SHA256 = re.compile(r"[0-9a-f]{64}")
+
+
 def _require_name(payload: dict[str, object]) -> str:
     raw = _require_str(payload, "name", max_length=MAX_NAME_LENGTH * 4)
     try:
@@ -232,13 +360,16 @@ def _check_version(payload: dict[str, object]) -> None:
         )
 
 
-def decode(line: bytes) -> Message:
-    """Décode une trame TCP (sans le séparateur final)."""
+def decode(line: bytes) -> Message | None:
+    """Décode une trame TCP (sans le séparateur final) ; ``None`` si son type est inconnu."""
     payload = _load(line)
+    kind_value = payload.get("type")
+    if not isinstance(kind_value, str):
+        raise ProtocolError("Type de trame absent.")
     try:
-        kind = MessageType(payload.get("type"))
-    except ValueError as exc:
-        raise ProtocolError(f"Type de trame inconnu : {payload.get('type')!r}.") from exc
+        kind = MessageType(kind_value)
+    except ValueError:
+        return None  # trame d'une version plus récente : ignorée
 
     match kind:
         case MessageType.HELLO:
@@ -260,6 +391,32 @@ def decode(line: bytes) -> Message:
             if not isinstance(active, bool):
                 raise ProtocolError("Champ « active » invalide.")
             return Message.typing(active)
+        case MessageType.REACT:
+            emoji = _require_str(payload, "emoji", max_length=MAX_EMOJI_LENGTH)
+            if any(ch.isspace() or ch.isalnum() for ch in emoji):
+                raise ProtocolError("Réaction invalide.")
+            return Message.react(_require_id(payload), emoji)
+        case MessageType.FILE_OFFER:
+            raw_name = _require_str(payload, "name", max_length=MAX_FILE_NAME_LENGTH * 2)
+            size = _require_int(payload, "size", maximum=MAX_FILE_SIZE)
+            thumb = b""
+            if "thumb" in payload:
+                thumb = _require_base64(payload, "thumb", max_size=MAX_THUMB_SIZE)
+            return Message.file_offer(_require_id(payload), safe_file_name(raw_name), size, thumb)
+        case MessageType.FILE_ANSWER:
+            return Message.file_answer(_require_id(payload), _require_bool(payload, "accept"))
+        case MessageType.FILE_CHUNK:
+            offset = _require_int(payload, "offset", maximum=MAX_FILE_SIZE)
+            data = _require_base64(payload, "data", max_size=CHUNK_SIZE)
+            return Message.file_chunk(_require_id(payload), offset, data)
+        case MessageType.FILE_END:
+            digest = _require_str(payload, "sha256", max_length=64)
+            if not _SHA256.fullmatch(digest):
+                raise ProtocolError("Empreinte invalide.")
+            return Message.file_end(_require_id(payload), digest)
+        case MessageType.FILE_CANCEL:
+            reason = _require_str(payload, "reason", max_length=500)
+            return Message.file_cancel(_require_id(payload), reason)
         case _:
             return Message.bye(_require_str(payload, "reason", max_length=500))
 
@@ -302,5 +459,5 @@ class FrameDecoder:
                 raise ProtocolError("Trame trop volumineuse.")
             line = bytes(self._buffer[:index])
             del self._buffer[: index + 1]
-            if line.strip():
-                messages.append(decode(line))
+            if line.strip() and (message := decode(line)) is not None:
+                messages.append(message)
