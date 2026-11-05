@@ -7,25 +7,30 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
 @pytest.fixture
-def make_session(qtbot):
-    """Crée des ChatSession et les détruit proprement en fin de test.
+def make_messenger(qtbot):
+    """Crée des Messenger démarrés (port libre) et les détruit en fin de test.
 
-    Sans cela, des objets Qt créés par Python survivent au test et sont détruits
-    après la QApplication, ce qui fait planter l'interpréteur à la sortie.
+    Sans destruction explicite, des objets Qt créés par Python survivent au test
+    et sont détruits après la QApplication.
     """
-    from socket_chat.network import ChatSession
+    from socket_chat.messenger import Messenger
+    from socket_chat.protocol import new_id
+    from socket_chat.store import Store
 
-    sessions: list[ChatSession] = []
+    created = []
 
-    def factory(name: str) -> ChatSession:
-        session = ChatSession(name)
-        sessions.append(session)
-        return session
+    def factory(name, *, user_id=None, store=None, start=True):
+        messenger = Messenger(store or Store(), user_id or new_id(), name)
+        created.append(messenger)
+        if start:
+            assert messenger.start(0)
+        return messenger
 
     yield factory
 
-    for session in sessions:
-        session.stop()
-    for session in sessions:
-        with qtbot.waitSignal(session.destroyed, timeout=1000):
-            session.deleteLater()
+    for messenger in created:
+        messenger.stop()
+    qtbot.wait(20)
+    for messenger in created:
+        with qtbot.waitSignal(messenger.destroyed, timeout=1000):
+            messenger.deleteLater()
