@@ -83,7 +83,7 @@ def test_normalize_source(tmp_path):
     assert normalize_source("https://intranet/maj/") == "https://intranet/maj/latest.json"
     folder = normalize_source(str(tmp_path))
     assert folder.startswith("file://") and folder.endswith("/latest.json")
-    assert QUrl(folder).toLocalFile() == str(tmp_path / "latest.json")
+    assert Path(QUrl(folder).toLocalFile()) == tmp_path / "latest.json"
 
 
 def test_plain_http_is_refused(qtbot):

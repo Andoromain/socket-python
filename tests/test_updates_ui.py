@@ -4,7 +4,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QSettings, QUrl
 from PySide6.QtWidgets import QTextBrowser
 
 from socket_chat import __version__
@@ -169,12 +169,11 @@ def test_busy_transfers_ask_for_confirmation(qtbot, setup, monkeypatch):
 
 def test_manual_check_feedback(qtbot, setup, tmp_path):
     _window, _banner, controller, messages, _installed, _repo = setup
-    controller.checker.url = "file://" + str(
-        make_repo(tmp_path / "ancien", "0.0.1") / "latest.json"
-    )
+    old_repo = make_repo(tmp_path / "ancien", "0.0.1")
+    controller.checker.url = QUrl.fromLocalFile(str(old_repo / "latest.json")).toString()
     check(qtbot, controller, manual=True, signal="up_to_date")
     assert messages and "dernière version" in messages[-1]
-    controller.checker.url = "file://" + str(tmp_path / "absent" / "latest.json")
+    controller.checker.url = QUrl.fromLocalFile(str(tmp_path / "absent" / "latest.json")).toString()
     check(qtbot, controller, manual=True, signal="failed")
     assert "Impossible de vérifier" in messages[-1]
     check(qtbot, controller, manual=False, signal="failed")
