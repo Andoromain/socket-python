@@ -1,5 +1,29 @@
 # Journal des modifications
 
+## 3.2.0
+
+Compatible avec la 3.1 (même protocole). Dernière mise à jour à installer à la main :
+les suivantes se feront depuis l'application.
+
+### Ajouté
+- **Mise à jour automatique** : l'application vérifie au démarrage puis toutes les
+  6 heures si une nouvelle version existe et l'annonce dans un bandeau (et une fois dans
+  la zone de notification). Un clic télécharge l'installeur, vérifie taille et SHA-256,
+  l'installe silencieusement et relance l'application. Nouveautés, « Plus tard »,
+  « Ignorer cette version », et menu Aide › Rechercher des mises à jour.
+- Publication des installeurs et du manifeste `latest.json` dans un dépôt public dédié
+  (`socket-chat-releases`) : le code reste privé.
+- Source de mise à jour réglable par l'administrateur (`update/url` : HTTPS ou dossier
+  réseau) ou désactivable (`update/enabled`).
+- `socket-chat --update` : vérifie et installe la mise à jour sans rien demander
+  (scripts d'administration).
+- Installeur Windows : `/RELAUNCH=1` relance l'application après une installation
+  silencieuse ; `install.sh --relaunch` fait de même sous Linux, après avoir laissé
+  l'application se fermer d'elle-même. Les téléchargements précédents sont supprimés
+  au démarrage suivant.
+- Le workflow Release construit aussi les installeurs sur les pull requests qui touchent
+  au packaging, pour vérifier l'installeur avant publication.
+
 ## 3.1.1
 
 Compatible avec la 3.1.0 (même protocole) : pas besoin de mettre tous les postes à

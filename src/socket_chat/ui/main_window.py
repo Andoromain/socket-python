@@ -144,7 +144,13 @@ class MainWindow(QMainWindow):
         self.splitter.setSizes([300, 640])
         self.splitter.setChildrenCollapsible(False)
         left.setMinimumWidth(220)
-        self.setCentralWidget(self.splitter)
+        central = QWidget(self)
+        #: Zone des bandeaux (mise à jour disponible…), au-dessus des panneaux.
+        self.banner_area = QVBoxLayout(central)
+        self.banner_area.setContentsMargins(0, 0, 0, 0)
+        self.banner_area.setSpacing(0)
+        self.banner_area.addWidget(self.splitter, 1)
+        self.setCentralWidget(central)
         self._refresh_me()
 
     def _build_menus(self) -> None:
@@ -173,7 +179,8 @@ class MainWindow(QMainWindow):
         menu.addAction(settings_action)
         menu.addSeparator()
         menu.addAction(quit_action)
-        self.menuBar().addMenu("&Aide").addAction(about_action)
+        self.help_menu = self.menuBar().addMenu("&Aide")
+        self.help_menu.addAction(about_action)
 
     def _connect_messenger(self) -> None:
         m = self.messenger
@@ -228,6 +235,10 @@ class MainWindow(QMainWindow):
         self.search.clear()
         index = self.proxy.mapFromSource(self.contacts.index(row))
         self.contact_list.setCurrentIndex(index)
+
+    def add_banner(self, banner: QWidget) -> None:
+        """Ajoute un bandeau en haut de la fenêtre, au-dessus des deux panneaux."""
+        self.banner_area.insertWidget(self.banner_area.count() - 1, banner)
 
     def show_and_raise(self) -> None:
         if self.isMinimized():

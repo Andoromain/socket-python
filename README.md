@@ -72,7 +72,18 @@ ou, sans pipx, `pip install --user <url ou chemin du dépôt>`. Cela fournit la 
 
 ### Mettre à jour
 
-Il suffit d'**installer la nouvelle version par-dessus l'ancienne**, sans désinstaller :
+À partir de la 3.2, **Socket Chat se met à jour tout seul** : un bandeau annonce la
+nouvelle version, et un clic sur **Mettre à jour** la télécharge, vérifie son empreinte
+SHA-256, l'installe et relance l'application. **Nouveautés** affiche les changements,
+**Plus tard** la reproposera, **Ignorer cette version** la masque. Menu
+**Aide › Rechercher des mises à jour** pour vérifier à la demande, ou
+`socket-chat --update` pour vérifier et installer sans rien demander (scripts
+d'administration).
+
+![Bandeau de mise à jour](docs/mise-a-jour.png)
+
+Pour passer d'une version **antérieure à la 3.2** (ou sans mise à jour automatique),
+il suffit d'**installer la nouvelle version par-dessus l'ancienne**, sans désinstaller :
 
 | Installation d'origine | Mise à jour |
 |---|---|
@@ -87,6 +98,37 @@ converti automatiquement si le format change.
 > Après une mise à jour qui change la version du protocole (indiqué dans le
 > [journal des modifications](CHANGELOG.md), par exemple 3.0 → 3.1), **tous les postes
 > doivent être mis à jour** : les versions différentes ne communiquent pas entre elles.
+
+### Mise à jour automatique : mise en place (une seule fois)
+
+Le code est dans un dépôt **privé**, que les postes ne peuvent pas lire. Les installeurs
+sont donc publiés dans un **second dépôt public** qui ne contient qu'eux :
+
+1. Créer le dépôt **public** `andoajpr2/socket-chat-releases` (vide, avec un README).
+2. Créer un jeton GitHub *fine-grained* (Settings › Developer settings › Personal access
+   tokens) limité à ce dépôt, avec la permission **Contents : Read and write**.
+3. Dans ce dépôt-ci, Settings › Secrets and variables › Actions : ajouter ce jeton sous
+   le nom **`RELEASES_TOKEN`**.
+
+À chaque tag `vX.Y.Z`, le workflow **Release** publie alors aussi les installeurs et le
+manifeste `latest.json` dans le dépôt public. Sans le secret, la publication publique est
+simplement ignorée (avertissement dans le workflow).
+
+Les postes lisent
+`https://github.com/andoajpr2/socket-chat-releases/releases/latest/download/latest.json`
+(Internet nécessaire ; le proxy système est utilisé).
+
+**Pour l'administrateur** : ces réglages se placent dans les préférences de l'utilisateur
+ou, pour tout le monde, dans `HKEY_LOCAL_MACHINE\Software\SocketChat\SocketChat`
+(Windows) ou `/etc/xdg/SocketChat/SocketChat.conf` (Linux) :
+
+| Clé | Effet |
+|---|---|
+| `update/url` | Autre source : adresse HTTPS, dossier réseau (`\\serveur\logiciels\socket-chat`) ou chemin local contenant `latest.json` et les installeurs |
+| `update/enabled` | `false` pour désactiver la mise à jour automatique |
+
+Pour un dossier réseau, y copier les fichiers de la Release (installeurs et
+`latest.json`) tels quels.
 
 ## Utilisation
 
@@ -148,6 +190,10 @@ Conçu pour un **réseau interne de confiance** :
   (le nom et l'identifiant annoncés sont déclaratifs). Ne pas l'utiliser pour des
   informations confidentielles ni l'exposer sur Internet.
 - L'historique est stocké en clair dans le profil de l'utilisateur.
+- Mise à jour automatique : uniquement en HTTPS (ou depuis un dossier), version
+  strictement plus récente, taille et empreinte SHA-256 vérifiées avant toute exécution.
+  La confiance repose sur le compte GitHub qui publie : protégez-le (double
+  authentification) et limitez le jeton `RELEASES_TOKEN` au seul dépôt public.
 - Les données reçues sont validées : taille limitée (10 000 caractères par message,
   64 Kio par trame), JSON strict, texte affiché sans interprétation HTML. Toute donnée
   invalide coupe la connexion.
@@ -187,6 +233,7 @@ src/socket_chat/
 ├── network.py        PeerConnection : une connexion TCP avec présentation mutuelle
 ├── messenger.py      Messenger : écoute, une connexion par contact, file d'envoi, accusés
 ├── transfers.py      transferts de fichiers : contrôle de flux, SHA-256, annulation
+├── updater.py        mise à jour automatique : manifeste, téléchargement vérifié, installation
 ├── discovery.py      Discovery : annonces UDP et détection des collègues
 ├── settings.py       préférences utilisateur (QSettings)
 ├── ui/               fenêtre, modèles, délégués (bulles), emojis, zone de notification
@@ -228,7 +275,8 @@ simultanée.
 ### Publier une version
 
 1. Mettre à jour `__version__` dans `src/socket_chat/__init__.py`, les numéros de
-   `packaging/windows/version_info.txt` et `CHANGELOG.md`.
+   `packaging/windows/version_info.txt` et `CHANGELOG.md` (la section de la version sert
+   de notes de mise à jour affichées dans l'application).
 2. Créer et pousser un tag `vX.Y.Z` : le workflow **Release** construit l'installeur
    Windows et l'archive Linux, puis les joint à une Release GitHub.
 
