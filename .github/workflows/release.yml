@@ -25,8 +25,23 @@ env:
   RELEASES_REPO: andoajpr2/socket-chat-releases
 
 jobs:
+  check:
+    name: Vérification du tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Échoue en quelques secondes (avant les constructions) si le tag ne désigne pas
+      # la version du code : sinon les postes verraient une mise à jour en boucle.
+      - name: Tag conforme à la version du code
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: python scripts/make_latest.py --check-tag "${{ github.ref_name }}"
+
   build:
     name: Build ${{ matrix.os }}
+    needs: check
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -98,6 +113,31 @@ jobs:
         with:
           files: release/dist/*
           body_path: release/notes.md
+      - name: Préparation du dépôt public
+        if: env.RELEASES_TOKEN != ''
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # GitHub refuse de finaliser une Release dans un dépôt sans aucun commit.
+          if out=$(gh api "repos/$RELEASES_REPO/commits?per_page=1" 2>&1); then
+            echo "Dépôt $RELEASES_REPO prêt."
+          elif echo "$out" | grep -qi "empty"; then
+            echo "Dépôt $RELEASES_REPO vide : création d'un premier README."
+            content=$(printf '%s\n' "# Socket Chat : installeurs" "" \
+              "Versions publiées de Socket Chat, lues par la mise à jour automatique." | base64 -w0)
+            gh api -X PUT "repos/$RELEASES_REPO/contents/README.md" \
+              -f message="Initialisation du dépôt des installeurs" -f content="$content" >/dev/null
+          else
+            echo "::error title=Dépôt public inaccessible::$RELEASES_REPO : $out (vérifiez le dépôt et le jeton RELEASES_TOKEN)"
+            exit 1
+          fi
+          # Brouillon laissé par une publication interrompue : supprimé pour éviter un doublon.
+          for id in $(gh api "repos/$RELEASES_REPO/releases?per_page=100" \
+              --jq ".[] | select(.draft and .tag_name == \"$TAG\") | .id"); do
+            echo "Suppression du brouillon $id ($TAG) laissé par une publication précédente."
+            gh api -X DELETE "repos/$RELEASES_REPO/releases/$id"
+          done
       - name: Release publique (mise à jour automatique)
         if: env.RELEASES_TOKEN != ''
         uses: softprops/action-gh-release@v2

@@ -274,11 +274,25 @@ simultanée.
 
 ### Publier une version
 
-1. Mettre à jour `__version__` dans `src/socket_chat/__init__.py`, les numéros de
-   `packaging/windows/version_info.txt` et `CHANGELOG.md` (la section de la version sert
-   de notes de mise à jour affichées dans l'application).
-2. Créer et pousser un tag `vX.Y.Z` : le workflow **Release** construit l'installeur
-   Windows et l'archive Linux, puis les joint à une Release GitHub.
+L'ordre compte : **le numéro de version change dans le code avant le tag**.
+
+1. Dans une PR, mettre à jour `__version__` dans `src/socket_chat/__init__.py`, les
+   numéros de `packaging/windows/version_info.txt` et `CHANGELOG.md` (la section de la
+   version sert de notes de mise à jour affichées dans l'application).
+2. Fusionner la PR.
+3. Créer et pousser le tag correspondant, depuis `main` à jour :
+   ```bash
+   git tag vX.Y.Z
+   git push origin vX.Y.Z
+   ```
+   Le workflow **Release** vérifie d'abord que le tag correspond à la version du code
+   (sinon il s'arrête aussitôt avec la marche à suivre), construit l'installeur Windows
+   et l'archive Linux, puis les publie dans ce dépôt et dans le dépôt public.
+
+Si la publication échoue (dépôt public, jeton…), **ne créez pas de nouveau tag** :
+corrigez la cause puis, dans **Actions**, ouvrez l'exécution du tag et cliquez sur
+**Re-run failed jobs**. Un tag créé par erreur se supprime avec
+`git push origin --delete vX.Y.Z` puis `git tag -d vX.Y.Z`.
 
 Pour construire localement sur la plate-forme courante : `pip install ".[build]"` puis
 `python scripts/build.py` (sous Windows, l'installeur n'est produit que si
