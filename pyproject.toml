@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "socket-chat"
+dynamic = ["version"]
+description = "Messagerie instantanée de poste à poste pour le réseau interne"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["PySide6-Essentials>=6.5"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Environment :: X11 Applications :: Qt",
+    "Natural Language :: French",
+    # Empêche toute publication accidentelle sur PyPI : usage interne uniquement.
+    "Private :: Do Not Upload",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-qt>=4.4", "ruff>=0.6"]
+build = ["pyinstaller>=6.6", "pillow>=10"]
+
+[project.gui-scripts]
+socket-chat = "socket_chat.app:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "socket_chat.__version__" }
+
+[tool.setuptools.package-data]
+socket_chat = ["resources/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+qt_api = "pyside6"
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "N", "SIM", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003"]  # caractères typographiques français
