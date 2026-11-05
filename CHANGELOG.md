@@ -1,5 +1,31 @@
 # Journal des modifications
 
+## 3.0.0
+
+Socket Chat devient une vraie messagerie. **Incompatible avec la 2.x** (protocole
+version 2) : mettre à jour tous les postes.
+
+### Ajouté
+- **Détection automatique** des collègues sur le réseau local (annonces UDP, port
+  12801) : plus besoin de saisir d'adresse. L'ajout par adresse reste possible.
+- **Plusieurs conversations** simultanées : liste des contacts avec avatar, présence,
+  aperçu du dernier message, heure, compteur de non-lus et recherche.
+- **Bulles de messages** : regroupement des messages successifs, séparateurs par jour,
+  heure dans la bulle, menu « Copier », thème clair ou sombre automatique.
+- **Accusés de réception et de lecture** (🕓 en attente, ✓ envoyé, ✓✓ remis,
+  ✓✓ bleu lu) et indication **« écrit… »**.
+- **Historique conservé** (SQLite dans le profil utilisateur).
+- **File d'envoi** : un message écrit hors ligne est remis au retour du collègue,
+  sans doublon en cas de retransmission.
+- **Zone de notification** : notifications, compteur de non-lus, l'application reste
+  active à la fermeture de la fenêtre (réglable).
+- **Instance unique** : relancer l'application réaffiche la fenêtre existante.
+
+### Modifié
+- Plus de modes « Héberger » / « Rejoindre » : chaque poste écoute en permanence.
+- Chaque utilisateur a un identifiant stable ; une seule connexion par collègue, même
+  si deux postes se connectent l'un à l'autre en même temps.
+
 ## 2.0.1
 
 ### Corrigé
