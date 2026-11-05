@@ -25,6 +25,15 @@ clair ou sombre selon le système.
 
 <p align="center"><img src="docs/emojis.png" alt="Sélecteur d'emojis" width="370"></p>
 
+**Nouveau : application Android** (en test, voir [Android](#android-en-test)). Un téléphone
+sur le Wi-Fi de l'entreprise converse avec les postes Windows et Linux.
+
+<p align="center">
+  <img src="docs/android-contacts.png" alt="Android : liste des contacts" width="240">
+  <img src="docs/android-conversation.png" alt="Android : conversation" width="240">
+  <img src="docs/android-sombre.png" alt="Android : thème sombre" width="240">
+</p>
+
 ## Installation
 
 ### Windows
@@ -69,6 +78,39 @@ pipx install git+https://github.com/andoajpr2/socket-python.git
 
 ou, sans pipx, `pip install --user <url ou chemin du dépôt>`. Cela fournit la commande
 `socket-chat`.
+
+### Android (en test)
+
+L'application Android parle le même protocole que les postes : pas de serveur, le
+téléphone doit simplement être sur **le même réseau** (le Wi-Fi de l'entreprise).
+
+1. Dans l'onglet **Actions** du dépôt, ouvrir la dernière exécution réussie de **CI**
+   et télécharger l'artefact **socket-chat-android-test** (fichier zip contenant
+   `socket-chat-X.Y.Z-android-test.apk`).
+2. Copier l'APK sur le téléphone et l'ouvrir. Android demande d'autoriser
+   l'installation depuis cette source (gestionnaire de fichiers ou navigateur) :
+   c'est normal pour une application hors Play Store.
+3. Au premier lancement, saisir son nom : les collègues du réseau apparaissent.
+
+Déjà disponible : détection des collègues, ajout par adresse, conversations, coches,
+« écrit… », emojis et réactions (appui long sur une bulle), messages hors ligne remis
+plus tard. Une offre de fichier venant d'un PC s'affiche et peut être refusée.
+
+Pas encore (version suivante) : réception et envoi de fichiers et de photos,
+notifications quand l'application est fermée, mise à jour intégrée, APK signé avec la
+clé définitive. **Cette version de test devra être désinstallée** avant d'installer la
+version publiée (la clé de signature changera) ; l'historique du téléphone sera perdu.
+
+Limites à connaître :
+
+- Pour l'instant, l'application ne reçoit les messages que lorsqu'elle est ouverte (au
+  premier plan ou récemment utilisée). Les messages envoyés pendant ce temps attendent
+  sur le poste de l'expéditeur et arrivent à la réouverture.
+- Certains réseaux Wi-Fi d'entreprise **isolent les appareils entre eux** (« isolation
+  des clients ») : ni la détection ni les connexions ne passent alors. Ce réglage relève
+  du service informatique.
+- Si un collègue n'apparaît pas tout seul, l'ajouter par son adresse : elle est affichée
+  dans les Préférences du téléphone et en bas de la liste des contacts sur PC.
 
 ### Mettre à jour
 
@@ -189,7 +231,11 @@ Conçu pour un **réseau interne de confiance** :
 - Les échanges **ne sont pas chiffrés** et les correspondants ne sont pas authentifiés
   (le nom et l'identifiant annoncés sont déclaratifs). Ne pas l'utiliser pour des
   informations confidentielles ni l'exposer sur Internet.
-- L'historique est stocké en clair dans le profil de l'utilisateur.
+- L'historique est stocké en clair dans le profil de l'utilisateur (sur Android, dans
+  l'espace privé de l'application).
+- Sur **Wi-Fi**, les échanges non chiffrés sont plus exposés qu'en filaire : n'utiliser
+  l'application Android que sur le Wi-Fi interne protégé (WPA2/WPA3 entreprise), jamais
+  sur un réseau invité ou public.
 - Mise à jour automatique : uniquement en HTTPS (ou depuis un dossier), version
   strictement plus récente, taille et empreinte SHA-256 vérifiées avant toute exécution.
   La confiance repose sur le compte GitHub qui publie : protégez-le (double
@@ -243,6 +289,51 @@ src/socket_chat/
 Tout repose sur la boucle d'événements Qt : aucun thread, les signaux de `Messenger`
 sont reliés directement à l'interface.
 
+### Application Android (`mobile/`)
+
+Application Flutter (Dart). Le cœur réseau est une **transposition fidèle** des modules
+Python (mêmes règles, mêmes correctifs) ; toute évolution du protocole se fait des deux
+côtés.
+
+```
+mobile/lib/
+├── protocol/     trames et annonces (protocol.py)
+├── store/        historique SQLite (store.py), même schéma
+├── net/          connexion, messagerie, fichiers, détection (network.py, messenger.py…)
+├── app/          préférences, contrôleur, canal Android (verrou multicast Wi-Fi)
+└── ui/           écrans Material 3
+mobile/tool/peer.dart   pair en ligne de commande pour le test d'interopérabilité
+```
+
+Avec [Flutter](https://docs.flutter.dev/get-started/install) (version de la CI) :
+
+```bash
+cd mobile && flutter pub get
+```
+
+```bash
+flutter analyze && flutter test && dart format --set-exit-if-changed .
+```
+
+```bash
+flutter build apk --release
+```
+
+Compatibilité vérifiée automatiquement :
+
+- `scripts/make_protocol_vectors.py` génère `mobile/test/fixtures/protocol_vectors.json`
+  depuis `protocol.py` (trames valides et leur encodage exact, trames à rejeter) ; les
+  tests Python et Dart lisent ce même fichier. Après une modification du protocole :
+  `python scripts/make_protocol_vectors.py`.
+- `tests/test_interop.py` fait converser la version PC avec `mobile/tool/peer.dart`
+  (messages, accusés, réactions, fichiers dans les deux sens, détection). Ignoré si Dart
+  est absent ; obligatoire dans le job « Android » de la CI.
+- La version de `mobile/pubspec.yaml` (et son `versionCode`, `X*10000 + Y*100 + Z`) doit
+  être celle de `src/socket_chat/__init__.py`.
+
+Captures d'écran de l'interface (à vérifier à l'œil) :
+`SOCKET_CHAT_SCREENSHOTS=/un/dossier flutter test --update-goldens test/screenshots`.
+
 ### Protocole (version 3)
 
 Une trame TCP est un objet JSON UTF-8 sur une ligne, terminé par `\n` :
@@ -277,8 +368,10 @@ simultanée.
 L'ordre compte : **le numéro de version change dans le code avant le tag**.
 
 1. Dans une PR, mettre à jour `__version__` dans `src/socket_chat/__init__.py`, les
-   numéros de `packaging/windows/version_info.txt` et `CHANGELOG.md` (la section de la
-   version sert de notes de mise à jour affichées dans l'application).
+   numéros de `packaging/windows/version_info.txt`, la version de l'application Android
+   (`version` de `mobile/pubspec.yaml`, par exemple `3.3.1+30301`, et
+   `mobile/lib/version.dart`) et `CHANGELOG.md` (la section de la version sert de notes
+   de mise à jour affichées dans l'application). Les tests signalent tout oubli.
 2. Fusionner la PR.
 3. Créer et pousser le tag correspondant, depuis `main` à jour :
    ```bash

@@ -25,9 +25,12 @@ MOBILE = Path(__file__).resolve().parents[1] / "mobile"
 DART = os.environ.get("SOCKET_CHAT_DART") or shutil.which("dart")
 TIMEOUT = 20_000
 
+_AVAILABLE = bool(DART) and (MOBILE / ".dart_tool" / "package_config.json").is_file()
+if not _AVAILABLE and os.environ.get("SOCKET_CHAT_REQUIRE_INTEROP"):
+    raise RuntimeError("Test d'interopérabilité exigé, mais Dart ou mobile/.dart_tool est absent.")
+
 pytestmark = pytest.mark.skipif(
-    not DART or not (MOBILE / ".dart_tool" / "package_config.json").is_file(),
-    reason="Dart ou les dépendances de mobile/ ne sont pas installés",
+    not _AVAILABLE, reason="Dart ou les dépendances de mobile/ ne sont pas installés"
 )
 
 
