@@ -113,6 +113,11 @@ class FileTransfers(QObject):
         self._downloads: dict[str, _Download] = {}
 
     # -- État ------------------------------------------------------------
+    @property
+    def active_count(self) -> int:
+        """Nombre de transferts en cours (envois et réceptions)."""
+        return len(self._uploads) + len(self._downloads)
+
     def progress_of(self, message_id: str) -> tuple[int, int] | None:
         if (up := self._uploads.get(message_id)) is not None:
             return up.offset, up.size

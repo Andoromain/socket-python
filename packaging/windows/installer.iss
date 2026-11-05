@@ -48,6 +48,15 @@ Name: "{autodesktop}\Socket Chat"; Filename: "{app}\socket-chat.exe"; Tasks: des
 [Run]
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""Socket Chat"" dir=in action=allow program=""{app}\socket-chat.exe"" enable=yes"; Flags: runhidden; Tasks: firewall
 Filename: "{app}\socket-chat.exe"; Description: "{cm:LaunchProgram,Socket Chat}"; Flags: nowait postinstall skipifsilent
+; Mise à jour automatique : l'application lance l'installeur avec /VERYSILENT /RELAUNCH=1
+; puis se ferme ; elle est relancée une fois la nouvelle version installée.
+Filename: "{app}\socket-chat.exe"; Flags: nowait runasoriginaluser; Check: ShouldRelaunch
 
 [UninstallRun]
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Socket Chat"""; Flags: runhidden; RunOnceId: "RemoveFirewallRule"; Check: IsAdminInstallMode
+
+[Code]
+function ShouldRelaunch: Boolean;
+begin
+  Result := WizardSilent and (ExpandConstant('{param:RELAUNCH|0}') = '1');
+end;

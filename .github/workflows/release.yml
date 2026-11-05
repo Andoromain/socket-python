@@ -1,15 +1,28 @@
 name: Release
 
-# Construit l'installeur Windows et l'archive Linux.
+# Construit l'installeur Windows et l'archive Linux, puis le manifeste de mise à jour
+# (latest.json).
+# - Pull request touchant au packaging : construction et vérification seulement.
 # - Lancement manuel : fichiers disponibles dans l'onglet « Artifacts » de l'exécution.
-# - Tag vX.Y.Z : fichiers joints à une Release GitHub.
+# - Tag vX.Y.Z : Release dans ce dépôt (privé) et, si le secret RELEASES_TOKEN existe,
+#   dans le dépôt public RELEASES_REPO consulté par la mise à jour automatique.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+  pull_request:
+    paths:
+      - "packaging/**"
+      - "scripts/**"
+      - ".github/workflows/release.yml"
+      - "src/socket_chat/updater.py"
 
 permissions:
   contents: write
+
+env:
+  # Dépôt PUBLIC qui ne contient que les installeurs (le code reste privé).
+  RELEASES_REPO: andoajpr2/socket-chat-releases
 
 jobs:
   build:
@@ -41,16 +54,64 @@ jobs:
             dist/*.tar.gz
           if-no-files-found: error
 
-  publish:
-    if: startsWith(github.ref, 'refs/tags/v')
+  manifest:
+    name: Manifeste de mise à jour
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - uses: actions/download-artifact@v4
         with:
           path: dist
+          pattern: socket-chat-*
           merge-multiple: true
-      - uses: softprops/action-gh-release@v2
+      - name: latest.json
+        env:
+          TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
+        run: |
+          python scripts/make_latest.py --dist dist ${TAG:+--tag "$TAG"}
+          cat dist/latest.json
+          python -c "import json; print(json.load(open('dist/latest.json', encoding='utf-8'))['notes'])" > notes.md
+      - uses: actions/upload-artifact@v4
         with:
-          files: dist/*
-          generate_release_notes: true
+          name: release-files
+          path: |
+            dist/*
+            notes.md
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: manifest
+    runs-on: ubuntu-latest
+    env:
+      RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-files
+          path: release
+      - name: Release (dépôt privé)
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/dist/*
+          body_path: release/notes.md
+      - name: Release publique (mise à jour automatique)
+        if: env.RELEASES_TOKEN != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          repository: ${{ env.RELEASES_REPO }}
+          token: ${{ secrets.RELEASES_TOKEN }}
+          tag_name: ${{ github.ref_name }}
+          name: Socket Chat ${{ github.ref_name }}
+          body_path: release/notes.md
+          files: release/dist/*
+          make_latest: true
+      - name: Publication publique désactivée
+        if: env.RELEASES_TOKEN == ''
+        run: >-
+          echo "::warning::Secret RELEASES_TOKEN absent : la version n'est pas publiée dans
+          ${{ env.RELEASES_REPO }}, les postes ne verront pas la mise à jour automatique
+          (voir README, « Mise à jour automatique »)."

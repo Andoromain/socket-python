@@ -108,3 +108,45 @@ def test_other_processes_named_socket_chat_are_left_alone(tmp_path):
     finally:
         stranger.kill()
         stranger.wait()
+
+
+def test_relaunch_after_update(tmp_path):
+    """--relaunch (mise à jour automatique) redémarre la nouvelle version."""
+    home = tmp_path / "home"
+    home.mkdir()
+    marker = tmp_path / "relance.txt"
+    bundle = make_bundle(tmp_path, "3.2.0")
+    program = bundle / "socket-chat" / "socket-chat"
+    program.unlink()
+    program.write_text(f'#!/bin/sh\necho "$0" > "{marker}"\n')
+    program.chmod(0o755)
+    out = run_install(bundle, home, "--relaunch")
+    assert "relancé" in out and "relancez-le" not in out
+    deadline = time.monotonic() + 5
+    while not marker.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    expected = home / ".local" / "share" / "socket-chat" / "socket-chat"
+    assert marker.read_text().strip() == str(expected)
+
+
+def test_relaunch_lets_the_app_exit_by_itself(tmp_path):
+    """Mise à jour automatique : l'application qui se ferme n'est pas tuée."""
+    home = tmp_path / "home"
+    home.mkdir()
+    run_install(make_bundle(tmp_path, "3.2.0"), home)
+    app = home / ".local" / "share" / "socket-chat" / "socket-chat"
+    # Simule l'application qui se ferme d'elle-même en 1 s après avoir lancé la mise à jour.
+    closing = subprocess.Popen([str(app), "-e", "sleep 1"])
+    try:
+        time.sleep(0.2)
+        assert closing.poll() is None
+        bundle = make_bundle(tmp_path, "3.2.1")
+        program = bundle / "socket-chat" / "socket-chat"
+        program.unlink()
+        program.write_text("#!/bin/sh\nexit 0\n")
+        program.chmod(0o755)
+        run_install(bundle, home, "--relaunch")
+        assert closing.wait(timeout=10) == 0  # sortie normale, pas de signal
+    finally:
+        if closing.poll() is None:
+            closing.kill()
