@@ -17,13 +17,16 @@ a = Analysis(
 
 
 def _needed(dest: str) -> bool:
-    """Allège Qt WebEngine : français et anglais seulement, sans outils de développement."""
+    """Allège Qt WebEngine : français et anglais seulement, sans outils de développement
+    ni ressources des versions de débogage de Qt (*.debug.pak, *.debug.bin, sous Windows)."""
     path = dest.replace("\\", "/")
     name = path.rsplit("/", 1)[-1]
     if "/qtwebengine_locales/" in path:
         return name in ("fr.pak", "en-US.pak")
     if "/translations/" in path:
         return name.endswith("_fr.qm")
+    if ".debug." in name:
+        return False
     return name != "qtwebengine_devtools_resources.pak"
 
 

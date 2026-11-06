@@ -19,7 +19,7 @@ appels, et l'appelant en est averti.
 
 ### À savoir
 - Sur PC, les appels utilisent le moteur de Chrome intégré à Qt (Qt WebEngine) :
-  les installeurs dépassent désormais 100 Mo (environ 30 Mo auparavant).
+  les installeurs passent à environ 100 Mo (environ 30 Mo auparavant).
 - Windows : au premier appel, autoriser **QtWebEngineProcess** si le pare-feu le
   demande (l'option « pare-feu » de l'installeur en mode administrateur le fait).
 - Android : l'application doit être ouverte pour recevoir un appel ; la 3.7 le fera
