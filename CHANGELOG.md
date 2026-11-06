@@ -1,5 +1,30 @@
 # Journal des modifications
 
+## 3.6.0
+
+Compatible avec la 3.5 (même protocole) : un poste en version antérieure ignore les
+appels, et l'appelant en est averti.
+
+### Ajouté
+- **Appels audio** entre PC (Windows, Linux) et téléphones Android, dans tous les sens :
+  bouton 📞 en haut de la conversation, fenêtre ou écran d'appel entrant (Répondre,
+  Refuser) avec sonnerie, puis appel en cours (durée, couper le micro, raccrocher ; sur
+  Android : haut-parleur ou écouteur, écran éteint contre l'oreille). Le son passe
+  directement d'un appareil à l'autre, chiffré, sans serveur (WebRTC, codec Opus), avec
+  annulation d'écho, réduction de bruit et réglage automatique du volume du micro.
+- Les appels sont notés dans la conversation (« Appel audio · 3 min 12 », « Appel
+  manqué », « Appel refusé »…) ; un appel manqué est signalé comme un message non lu.
+- Cas prévus : correspondant occupé, pas de réponse au bout de 30 secondes, appels
+  croisés, coupure du réseau, correspondant en version trop ancienne.
+
+### À savoir
+- Sur PC, les appels utilisent le moteur de Chrome intégré à Qt (Qt WebEngine) :
+  les installeurs passent à environ 100 Mo (environ 30 Mo auparavant).
+- Windows : au premier appel, autoriser **QtWebEngineProcess** si le pare-feu le
+  demande (l'option « pare-feu » de l'installeur en mode administrateur le fait).
+- Android : l'application doit être ouverte pour recevoir un appel ; la 3.7 le fera
+  sonner même fermée.
+
 ## 3.5.0
 
 Compatible avec la 3.4 (même protocole) : rien ne change sur les postes Windows et Linux.

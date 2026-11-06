@@ -240,3 +240,36 @@ def test_udp_discovery_between_pc_and_phone(qtbot, make_messenger, phone):
     finally:
         disc.stop()
         disc.deleteLater()
+
+
+def test_calls_signaling_between_pc_and_phone(qtbot, make_messenger, phone):
+    """Appels : signalisation réelle des deux côtés, média simulé (pas de micro en CI)."""
+    from test_calls import FakeEngine
+
+    from socket_chat.calls import CallManager, CallState
+
+    pc = connected(qtbot, make_messenger, phone)
+    calls = CallManager(pc, FakeEngine, parent=pc)
+
+    # PC → téléphone : sonnerie, décroché, conversation, raccroché par le PC.
+    call = calls.start_call(phone.id)
+    phone.wait(qtbot, "incoming_call", contact=pc.user_id, media="audio")
+    qtbot.waitUntil(
+        lambda: calls.call and calls.call.state is CallState.RINGING_OUT, timeout=TIMEOUT
+    )
+    phone.command("accept_call")
+    qtbot.waitUntil(lambda: calls.call and calls.call.state is CallState.ACTIVE, timeout=TIMEOUT)
+    phone.wait(qtbot, "call_state", state="active", id=call.id)
+    with qtbot.waitSignal(calls.call_ended, timeout=TIMEOUT):
+        calls.hangup()
+    phone.wait(qtbot, "call_ended", contact=pc.user_id, outcome="completed")
+
+    # Téléphone → PC : refusé par le PC.
+    with qtbot.waitSignal(calls.incoming_call, timeout=TIMEOUT) as blocker:
+        phone.command("call", to=pc.user_id)
+    assert blocker.args == [phone.id, "audio"]
+    phone.wait(qtbot, "call_state", state="ringingOut")
+    calls.decline()
+    phone.wait(qtbot, "call_ended", contact=pc.user_id, outcome="declined")
+    outcomes = [m.call.outcome.value for m in pc.store.messages(phone.id) if m.call]
+    assert outcomes == ["completed", "declined"]

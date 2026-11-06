@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
 from dataclasses import dataclass, replace
@@ -110,6 +111,72 @@ class FileInfo:
         return self.extension in IMAGE_EXTENSIONS and bool(self.thumb)
 
 
+class CallOutcome(StrEnum):
+    """Issue d'un appel, du point de vue de ce poste."""
+
+    COMPLETED = "completed"  # conversation établie (durée enregistrée)
+    MISSED = "missed"  # appel reçu sans réponse
+    NO_ANSWER = "no_answer"  # appel émis sans réponse
+    DECLINED = "declined"  # refusé (par l'un ou l'autre)
+    BUSY = "busy"  # correspondant déjà en communication
+    CANCELLED = "cancelled"  # l'appelant a raccroché avant la réponse
+    FAILED = "failed"  # connexion impossible ou coupée
+    UNSUPPORTED = "unsupported"  # correspondant en version trop ancienne
+
+
+@dataclass(frozen=True)
+class CallInfo:
+    """Appel noté dans la conversation (localement, jamais transmis)."""
+
+    media: str  # « audio » ou « video »
+    outcome: CallOutcome
+    duration: int = 0  # secondes de conversation
+
+    def label(self, outgoing: bool) -> str:
+        kind = "vidéo" if self.media == "video" else "audio"
+        match self.outcome:
+            case CallOutcome.COMPLETED:
+                return f"Appel {kind} · {format_duration(self.duration)}"
+            case CallOutcome.MISSED:
+                return f"Appel {kind} manqué"
+            case CallOutcome.NO_ANSWER:
+                return "Pas de réponse"
+            case CallOutcome.DECLINED:
+                return "Appel refusé"
+            case CallOutcome.BUSY:
+                return "Correspondant occupé"
+            case CallOutcome.CANCELLED:
+                return "Appel annulé" if outgoing else f"Appel {kind} manqué"
+            case CallOutcome.UNSUPPORTED:
+                return "Appel impossible : le correspondant doit mettre Socket Chat à jour"
+            case _:
+                return "Échec de l'appel"
+
+    def to_json(self) -> str:
+        return json.dumps(
+            {"media": self.media, "outcome": self.outcome.value, "duration": self.duration}
+        )
+
+    @classmethod
+    def from_json(cls, text: str) -> CallInfo:
+        try:
+            raw = json.loads(text)
+            return cls(str(raw["media"]), CallOutcome(raw["outcome"]), int(raw.get("duration", 0)))
+        except (ValueError, KeyError, TypeError):
+            return cls("audio", CallOutcome.FAILED)
+
+
+def format_duration(seconds: int) -> str:
+    """« 42 s », « 3 min 05 », « 1 h 02 min »."""
+    if seconds < 60:
+        return f"{seconds} s"
+    minutes, secs = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes} min {secs:02d}"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours} h {minutes:02d} min"
+
+
 @dataclass(frozen=True)
 class Contact:
     id: str
@@ -132,6 +199,8 @@ class MessageRecord:
     file: FileInfo | None = None
     #: Réactions : paires (auteur, emoji), l'auteur étant ``ME`` ou l'identifiant du contact.
     reactions: tuple[tuple[str, str], ...] = ()
+    #: Appel noté dans la conversation (``text`` est alors vide).
+    call: CallInfo | None = None
 
     @property
     def unread(self) -> bool:
@@ -142,7 +211,16 @@ class MessageRecord:
         """Texte court pour la liste des contacts et les notifications."""
         if self.file is not None:
             return "🖼 Image" if self.file.is_image else f"📎 {self.file.name}"
+        if self.call is not None:
+            return f"📞 {self.call.label(self.outgoing)}"
         return " ".join(self.text.split())
+
+    @property
+    def display_text(self) -> str:
+        """Texte de la bulle : le message, ou la mention d'un appel."""
+        if self.call is not None:
+            return f"📞 {self.call.label(self.outgoing)}"
+        return self.text
 
     def reaction_of(self, author: str) -> str:
         return dict(self.reactions).get(author, "")
@@ -237,15 +315,7 @@ class Store:
         for row in rows:
             last = None
             if row["m_id"] is not None:
-                last = MessageRecord(
-                    row["m_id"],
-                    row["id"],
-                    bool(row["m_outgoing"]),
-                    row["m_text"],
-                    row["m_ts"],
-                    Status(row["m_status"]),
-                    _file(row, "m_"),
-                )
+                last = _message(row, "m_", contact_key="id")
             summaries.append(ContactSummary(_contact(row), last, row["unread"]))
         summaries.sort(key=lambda s: (-s.last_activity, s.contact.name.casefold()))
         return summaries
@@ -269,6 +339,8 @@ class Store:
     def add_message(self, record: MessageRecord) -> bool:
         """Enregistre un message ; renvoie ``False`` s'il existait déjà (doublon)."""
         f = record.file
+        kind = "file" if f else ("call" if record.call else "text")
+        text = record.call.to_json() if record.call else record.text
         with self._db:
             cursor = self._db.execute(
                 """
@@ -281,10 +353,10 @@ class Store:
                     record.id,
                     record.contact_id,
                     int(record.outgoing),
-                    record.text,
+                    text,
                     record.ts,
                     record.status.value,
-                    "file" if f else "text",
+                    kind,
                     f.name if f else None,
                     f.size if f else None,
                     f.state.value if f else None,
@@ -436,13 +508,15 @@ def _file(row: sqlite3.Row, prefix: str = "") -> FileInfo | None:
     )
 
 
-def _message(row: sqlite3.Row) -> MessageRecord:
+def _message(row: sqlite3.Row, prefix: str = "", contact_key: str = "contact_id") -> MessageRecord:
+    is_call = row[f"{prefix}kind"] == "call"
     return MessageRecord(
-        row["id"],
-        row["contact_id"],
-        bool(row["outgoing"]),
-        row["text"],
-        row["ts"],
-        Status(row["status"]),
-        _file(row),
+        row[f"{prefix}id"],
+        row[contact_key],
+        bool(row[f"{prefix}outgoing"]),
+        "" if is_call else row[f"{prefix}text"],
+        row[f"{prefix}ts"],
+        Status(row[f"{prefix}status"]),
+        _file(row, prefix),
+        call=CallInfo.from_json(row[f"{prefix}text"]) if is_call else None,
     )

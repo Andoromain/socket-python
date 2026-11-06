@@ -9,6 +9,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:socket_chat_mobile/app/avatar.dart';
+import 'package:socket_chat_mobile/net/calls.dart';
+import 'package:socket_chat_mobile/protocol/protocol.dart';
+import 'package:socket_chat_mobile/ui/call_screen.dart';
 import 'package:socket_chat_mobile/ui/settings_screen.dart';
 import 'package:socket_chat_mobile/app/controller.dart';
 import 'package:socket_chat_mobile/app/settings.dart';
@@ -194,5 +197,52 @@ void main() {
     updater.notifyListeners(); // ignore: invalid_use_of_protected_member, invalid_use_of_visible_for_testing_member
     await tester.pump();
     await capture(tester, find.byType(MaterialApp), '$output/7-telechargement.png');
+  });
+
+  testWidgets('captures appel', (tester) async {
+    if (output == null) return;
+    await tester.runAsync(loadFonts);
+    tester.view.physicalSize = const Size(1080, 2340);
+    tester.view.devicePixelRatio = 2.75;
+    addTearDown(tester.view.reset);
+    final controller = await makeController(name: 'Jean Dupont');
+    richHistory(controller.store);
+    final now = DateTime.now().millisecondsSinceEpoch;
+    controller.store.addMessage(
+      MessageRecord(
+        newId(),
+        alice,
+        true,
+        '',
+        now - 1500,
+        Status.read,
+        call: CallInfo('audio', CallOutcome.completed, 192),
+      ),
+    );
+    controller.store.addMessage(
+      MessageRecord(newId(), alice, false, '', now - 1000, Status.read, call: CallInfo('audio', CallOutcome.missed, 0)),
+    );
+    final call = Call(newId(), alice, 'audio', false, CallState.incoming);
+    controller.calls.call = call;
+    await tester.pumpWidget(
+      MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: screenshotTheme(Brightness.light),
+        home: CallScreen(controller: controller),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await capture(tester, find.byType(MaterialApp), '$output/8-appel-entrant.png');
+    call.state = CallState.active;
+    call.muted = true;
+    controller.calls.stateChanged.emit(call);
+    await tester.pump();
+    await capture(tester, find.byType(MaterialApp), '$output/9-appel-en-cours.png');
+    controller.calls.call = null;
+    await tester.pumpWidget(SocketChatApp(controller: controller, theme: screenshotTheme, themeMode: ThemeMode.light));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Alice Martin'));
+    await tester.pumpAndSettle();
+    await capture(tester, find.byType(MaterialApp), '$output/10-historique-appels.png');
   });
 }

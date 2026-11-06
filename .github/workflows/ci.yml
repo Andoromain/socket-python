@@ -17,6 +17,10 @@ jobs:
         python: ["3.12", "3.13"]
     env:
       QT_QPA_PLATFORM: offscreen
+      # Appels : WebEngine avec faux micro, sans bac à sable (machine virtuelle de CI).
+      QTWEBENGINE_DISABLE_SANDBOX: "1"
+      # Le test d'appel réel (WebRTC) doit s'exécuter sous Linux (pas d'« ignoré »).
+      SOCKET_CHAT_REQUIRE_WEBENGINE: ${{ startsWith(matrix.os, 'ubuntu') && '1' || '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -25,11 +29,37 @@ jobs:
           cache: pip
       - name: Bibliothèques système Qt
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libegl1 libxkbcommon0 libfontconfig1 libdbus-1-3
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libxkbcommon0 libfontconfig1 libdbus-1-3 libnss3 libxcomposite1 libxdamage1 libxrandr2 libxtst6 libxkbfile1 libgbm1 $(apt-cache show libasound2t64 >/dev/null 2>&1 && echo libasound2t64 || echo libasound2)
       - run: pip install -e ".[dev]"
       - run: ruff check .
       - run: ruff format --check .
       - run: pytest
+
+  package:
+    name: Empaquetage ${{ matrix.os }} (installeur, moteur des appels)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-22.04]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Bibliothèques système Qt
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libxkbcommon0 libfontconfig1 libdbus-1-3 libnss3 libxcomposite1 libxdamage1 libxrandr2 libxtst6 libxkbfile1 libgbm1 $(apt-cache show libasound2t64 >/dev/null 2>&1 && echo libasound2t64 || echo libasound2)
+      - name: Inno Setup
+        if: runner.os == 'Windows'
+        run: choco install innosetup -y --no-progress
+      - run: pip install ".[build]"
+      # Construit l'application et vérifie que le moteur des appels y démarre.
+      - run: python scripts/build.py
+      - name: Taille
+        shell: bash
+        run: ls -la dist/*.exe dist/*.tar.gz 2>/dev/null || true
 
   android:
     name: Android (Flutter, interopérabilité, APK de test)
@@ -61,7 +91,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Bibliothèques système Qt
-        run: sudo apt-get update && sudo apt-get install -y libegl1 libxkbcommon0 libfontconfig1 libdbus-1-3
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libxkbcommon0 libfontconfig1 libdbus-1-3 libnss3 libxcomposite1 libxdamage1 libxrandr2 libxtst6 libxkbfile1 libgbm1 $(apt-cache show libasound2t64 >/dev/null 2>&1 && echo libasound2t64 || echo libasound2)
       - name: Interopérabilité avec la version PC
         working-directory: .
         run: |

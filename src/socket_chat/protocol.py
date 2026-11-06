@@ -25,6 +25,15 @@ lignes.
 * ``{"type": "avatar", "data": "<base64>"}`` : photo de profil de l'expéditeur (JPEG
   ou PNG carré, 32 Kio au plus), envoyée à l'ouverture de la connexion et à chaque
   changement ; ``""`` la retire (depuis la 3.4, ignorée par les versions antérieures) ;
+* Appels (depuis la 3.6, ignorés par les versions antérieures ; média WebRTC) :
+
+  - ``{"type": "call_invite", "id": "<uuid de l'appel>", "media": "audio" | "video"}`` ;
+  - ``{"type": "call_ringing", "id": …}`` : l'appelé sonne (sinon : version trop ancienne) ;
+  - ``{"type": "call_accept", "id": …}`` : l'appelé décroche ;
+  - ``{"type": "call_sdp", "id": …, "kind": "offer" | "answer", "sdp": "…"}`` ;
+  - ``{"type": "call_ice", "id": …, "candidate": "…", "mid": "0", "index": 0}`` ;
+  - ``{"type": "call_end", "id": …, "reason": "hangup" | "declined" | "busy" | …}`` ;
+
 * ``{"type": "bye", "reason": "..."}`` : fermeture volontaire.
 
 Les trames d'un type inconnu sont ignorées : une version plus récente peut ajouter
@@ -68,6 +77,12 @@ CHUNK_SIZE = 32 * 1024
 MAX_THUMB_SIZE = 32 * 1024
 #: Taille maximale d'une photo de profil (octets, avant base64).
 MAX_AVATAR_SIZE = 32 * 1024
+#: Taille maximale d'une description de session WebRTC (SDP) et d'un candidat ICE.
+MAX_SDP_LENGTH = 16 * 1024
+MAX_ICE_LENGTH = 1024
+#: Médias d'appel reconnus et types de description de session.
+CALL_MEDIA = ("audio", "video")
+SDP_KINDS = ("offer", "answer")
 #: Longueur maximale d'un nom de fichier (caractères).
 MAX_FILE_NAME_LENGTH = 200
 #: Longueur maximale d'une réaction (caractères : un emoji composé peut en compter plusieurs).
@@ -90,6 +105,12 @@ class MessageType(StrEnum):
     FILE_END = "file_end"
     FILE_CANCEL = "file_cancel"
     AVATAR = "avatar"
+    CALL_INVITE = "call_invite"
+    CALL_RINGING = "call_ringing"
+    CALL_ACCEPT = "call_accept"
+    CALL_SDP = "call_sdp"
+    CALL_ICE = "call_ice"
+    CALL_END = "call_end"
     BYE = "bye"
 
 
@@ -156,6 +177,12 @@ class Message:
     offset: int = 0
     data: bytes = b""
     sha256: str = ""
+    media: str = ""  # call_invite
+    sdp_kind: str = ""  # call_sdp : offer / answer
+    sdp: str = ""
+    candidate: str = ""  # call_ice
+    mid: str = ""
+    index: int = 0
 
     # -- Constructeurs ---------------------------------------------------
     @classmethod
@@ -202,6 +229,30 @@ class Message:
     def avatar(cls, data: bytes) -> Message:
         """Photo de profil (``b""`` : retirée)."""
         return cls(MessageType.AVATAR, data=data)
+
+    @classmethod
+    def call_invite(cls, call_id: str, media: str = "audio") -> Message:
+        return cls(MessageType.CALL_INVITE, id=call_id, media=media)
+
+    @classmethod
+    def call_ringing(cls, call_id: str) -> Message:
+        return cls(MessageType.CALL_RINGING, id=call_id)
+
+    @classmethod
+    def call_accept(cls, call_id: str) -> Message:
+        return cls(MessageType.CALL_ACCEPT, id=call_id)
+
+    @classmethod
+    def call_sdp(cls, call_id: str, kind: str, sdp: str) -> Message:
+        return cls(MessageType.CALL_SDP, id=call_id, sdp_kind=kind, sdp=sdp)
+
+    @classmethod
+    def call_ice(cls, call_id: str, candidate: str, mid: str, index: int) -> Message:
+        return cls(MessageType.CALL_ICE, id=call_id, candidate=candidate, mid=mid, index=index)
+
+    @classmethod
+    def call_end(cls, call_id: str, reason: str = "hangup") -> Message:
+        return cls(MessageType.CALL_END, id=call_id, reason=reason)
 
     @classmethod
     def bye(cls, reason: str = "") -> Message:
@@ -253,6 +304,22 @@ class Message:
                 return {"type": kind, "id": self.id, "reason": self.reason}
             case MessageType.AVATAR:
                 return {"type": kind, "data": base64.b64encode(self.data).decode("ascii")}
+            case MessageType.CALL_INVITE:
+                return {"type": kind, "id": self.id, "media": self.media}
+            case MessageType.CALL_RINGING | MessageType.CALL_ACCEPT:
+                return {"type": kind, "id": self.id}
+            case MessageType.CALL_SDP:
+                return {"type": kind, "id": self.id, "kind": self.sdp_kind, "sdp": self.sdp}
+            case MessageType.CALL_ICE:
+                return {
+                    "type": kind,
+                    "id": self.id,
+                    "candidate": self.candidate,
+                    "mid": self.mid,
+                    "index": self.index,
+                }
+            case MessageType.CALL_END:
+                return {"type": kind, "id": self.id, "reason": self.reason}
             case _:
                 return {"type": kind, "reason": self.reason}
 
@@ -443,6 +510,29 @@ def decode(line: bytes) -> Message | None:
             if data and not is_avatar_image(data):
                 raise ProtocolError("Photo de profil invalide.")
             return Message.avatar(data)
+        case MessageType.CALL_INVITE:
+            media = _require_str(payload, "media", max_length=8)
+            if media not in CALL_MEDIA:
+                raise ProtocolError("Type d'appel invalide.")
+            return Message.call_invite(_require_id(payload), media)
+        case MessageType.CALL_RINGING:
+            return Message.call_ringing(_require_id(payload))
+        case MessageType.CALL_ACCEPT:
+            return Message.call_accept(_require_id(payload))
+        case MessageType.CALL_SDP:
+            sdp_kind = _require_str(payload, "kind", max_length=8)
+            sdp = _require_str(payload, "sdp", max_length=MAX_SDP_LENGTH)
+            if sdp_kind not in SDP_KINDS or not sdp:
+                raise ProtocolError("Description de session invalide.")
+            return Message.call_sdp(_require_id(payload), sdp_kind, sdp)
+        case MessageType.CALL_ICE:
+            candidate = _require_str(payload, "candidate", max_length=MAX_ICE_LENGTH)
+            mid = _require_str(payload, "mid", max_length=32)
+            index = _require_int(payload, "index", maximum=64)
+            return Message.call_ice(_require_id(payload), candidate, mid, index)
+        case MessageType.CALL_END:
+            reason = _require_str(payload, "reason", max_length=32)
+            return Message.call_end(_require_id(payload), reason)
         case _:
             return Message.bye(_require_str(payload, "reason", max_length=500))
 

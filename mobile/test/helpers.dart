@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:socket_chat_mobile/core/signal.dart';
+import 'package:socket_chat_mobile/net/calls.dart';
 import 'package:socket_chat_mobile/net/messenger.dart';
 import 'package:socket_chat_mobile/protocol/protocol.dart';
 import 'package:socket_chat_mobile/store/store.dart';
@@ -64,4 +65,40 @@ Future<void> link(Messenger a, Messenger b) async {
   a.addContact('127.0.0.1', b.port!);
   await Future.wait([seenByA, seenByB]);
   expect(a.isOnline(b.userId) && b.isOnline(a.userId), isTrue);
+}
+
+/// Média d'appel simulé : connecté dès que l'offre et la réponse sont passées.
+class FakeEngine extends MediaEngine {
+  static final instances = <FakeEngine>[];
+  FakeEngine() {
+    instances.add(this);
+  }
+  final remoteIce = <(String, String, int)>[];
+  bool muted = false;
+  bool speaker = false;
+  bool stopped = false;
+
+  @override
+  Future<void> start({required bool caller, required String media}) async {
+    if (caller) Timer.run(() => localDescription.emit(('offer', 'v=0 offre')));
+    Timer.run(() => localIce.emit(('candidate:1 1 udp 1 10.0.0.1 1 typ host', '0', 0)));
+  }
+
+  @override
+  Future<void> setRemoteDescription(String kind, String sdp) async {
+    if (kind == 'offer') Timer.run(() => localDescription.emit(('answer', 'v=0 réponse')));
+    Timer(const Duration(milliseconds: 10), () => connected.emit(null));
+  }
+
+  @override
+  Future<void> addRemoteIce(String candidate, String mid, int index) async => remoteIce.add((candidate, mid, index));
+
+  @override
+  void setMuted(bool value) => muted = value;
+
+  @override
+  void setSpeaker(bool on) => speaker = on;
+
+  @override
+  Future<void> stop() async => stopped = true;
 }

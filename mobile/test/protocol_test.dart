@@ -24,6 +24,12 @@ Map<String, Object?> fieldsOf(Message m) => {
   'offset': m.offset,
   'data': base64Encode(m.data ?? Uint8List(0)),
   'sha256': m.sha256,
+  'media': m.media,
+  'sdp_kind': m.sdpKind,
+  'sdp': m.sdp,
+  'candidate': m.candidate,
+  'mid': m.mid,
+  'index': m.index,
 };
 
 Message messageFromFields(Map<String, dynamic> f) {
@@ -47,6 +53,12 @@ Message messageFromFields(Map<String, dynamic> f) {
     offset: f['offset'] as int,
     data: f['type'] == 'file_chunk' ? base64Decode(f['data'] as String) : bytes('data'),
     sha256: f['sha256'] as String,
+    media: f['media'] as String,
+    sdpKind: f['sdp_kind'] as String,
+    sdp: f['sdp'] as String,
+    candidate: f['candidate'] as String,
+    mid: f['mid'] as String,
+    index: f['index'] as int,
   );
 }
 

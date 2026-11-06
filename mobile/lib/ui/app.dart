@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../app/controller.dart';
+import '../net/calls.dart';
+import 'call_screen.dart';
 import 'contacts_screen.dart';
 import 'format.dart';
 import 'welcome_screen.dart';
@@ -33,6 +35,8 @@ class SocketChatApp extends StatefulWidget {
 
 class _SocketChatAppState extends State<SocketChatApp> {
   final GlobalKey<ScaffoldMessengerState> _messenger = GlobalKey();
+  final GlobalKey<NavigatorState> _navigator = GlobalKey();
+  Route<void>? _callRoute;
   late final AppLifecycleListener _lifecycle;
 
   ChatController get controller => widget.controller;
@@ -41,6 +45,7 @@ class _SocketChatAppState extends State<SocketChatApp> {
   void initState() {
     super.initState();
     controller.errors.connect(_showError);
+    controller.calls.stateChanged.connect(_onCall);
     _lifecycle = AppLifecycleListener(
       onResume: () => controller.setVisible(true),
       onHide: () => controller.setVisible(false),
@@ -50,6 +55,7 @@ class _SocketChatAppState extends State<SocketChatApp> {
   @override
   void dispose() {
     controller.errors.disconnect(_showError);
+    controller.calls.stateChanged.disconnect(_onCall);
     _lifecycle.dispose();
     super.dispose();
   }
@@ -58,9 +64,23 @@ class _SocketChatAppState extends State<SocketChatApp> {
     _messenger.currentState?.showSnackBar(SnackBar(content: Text(message), duration: const Duration(seconds: 6)));
   }
 
+  /// Un appel commence (entrant ou sortant) : écran d'appel par-dessus le reste.
+  Future<void> _onCall(Call? call) async {
+    final navigator = _navigator.currentState;
+    if (call == null || navigator == null || (_callRoute?.isActive ?? false)) return;
+    final route = MaterialPageRoute<void>(
+      settings: const RouteSettings(name: 'call'),
+      fullscreenDialog: true,
+      builder: (_) => CallScreen(controller: controller),
+    );
+    _callRoute = route;
+    await navigator.push(route);
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: _navigator,
       title: 'Socket Chat',
       debugShowCheckedModeBanner: false,
       scaffoldMessengerKey: _messenger,

@@ -3,12 +3,15 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import '../calls/webrtc_engine.dart';
 import '../core/signal.dart';
+import '../net/calls.dart';
 import '../net/discovery.dart';
 import '../net/messenger.dart';
 import '../protocol/protocol.dart';
 import '../store/store.dart';
 import '../updates/app_updater.dart';
+import 'call_platform.dart';
 import 'platform.dart';
 import 'settings.dart';
 
@@ -24,7 +27,12 @@ class ChatController extends ChangeNotifier {
     this.useDiscovery = true,
     this.useNetwork = true,
     this.updater,
+    this.callPlatform = const CallPlatform(),
+    EngineFactory? engineFactory,
   }) : messenger = Messenger(store, settings.userId, settings.name ?? 'Android', avatar: settings.avatar) {
+    calls = CallManager(messenger, engineFactory ?? WebRtcEngine.new);
+    calls.stateChanged.connect(_onCallState);
+    calls.error.connect(errors.emit);
     messenger.contactsChanged.connect((_) => _changed());
     messenger.messageAdded.connect(_onMessageAdded);
     messenger.messageStatusChanged.connect((_) => _changed());
@@ -45,6 +53,12 @@ class ChatController extends ChangeNotifier {
   final bool useNetwork;
   final Messenger messenger;
   Discovery? _discovery;
+
+  /// Appels audio (un à la fois).
+  late final CallManager calls;
+  final CallPlatform callPlatform;
+  bool _ringing = false;
+  bool _proximity = false;
 
   /// Mise à jour de l'application ; `null` hors Android (tests).
   final AppUpdater? updater;
@@ -105,6 +119,7 @@ class ChatController extends ChangeNotifier {
   }
 
   Future<void> stop() async {
+    calls.stop();
     _discovery?.stop();
     _discovery = null;
     messenger.stop();
@@ -170,6 +185,35 @@ class ChatController extends ChangeNotifier {
     }
     messenger.addContact(host, port);
     return true;
+  }
+
+  // -- Appels -----------------------------------------------------------
+  /// Appelle un contact ; `false` (avec un message d'erreur) si c'est impossible.
+  bool startCall(String contactId) {
+    try {
+      calls.startCall(contactId);
+      return true;
+    } on StateError catch (e) {
+      errors.emit(e.message);
+      return false;
+    }
+  }
+
+  bool canCall(String contactId) => calls.call == null && messenger.isConnected(contactId);
+
+  void _onCallState(Call? call) {
+    final ringing = call?.state == CallState.incoming;
+    if (ringing != _ringing) {
+      _ringing = ringing;
+      ringing ? callPlatform.startRinging() : callPlatform.stopRinging();
+    }
+    final proximity =
+        call != null && !call.speaker && (call.state == CallState.connecting || call.state == CallState.active);
+    if (proximity != _proximity) {
+      _proximity = proximity;
+      callPlatform.setProximity(proximity);
+    }
+    _changed();
   }
 
   void deleteContact(String contactId) {

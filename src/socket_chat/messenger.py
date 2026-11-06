@@ -29,7 +29,17 @@ from .protocol import (
     safe_file_name,
     validate_name,
 )
-from .store import ME, FileInfo, FileState, MessageRecord, Status, Store, now_ms
+from .store import (
+    ME,
+    CallInfo,
+    CallOutcome,
+    FileInfo,
+    FileState,
+    MessageRecord,
+    Status,
+    Store,
+    now_ms,
+)
 from .transfers import FileTransfers, check_sendable, make_thumbnail
 
 log = logging.getLogger(__name__)
@@ -57,6 +67,8 @@ class Messenger(QObject):
     typing_changed = Signal(str, bool)  # contact, en train d'écrire
     presence_changed = Signal(str, bool)  # contact, en ligne
     avatar_changed = Signal(str)  # contact dont la photo de profil a changé
+    call_frame = Signal(str, object)  # contact, trame d'appel (voir calls.py)
+    peer_disconnected = Signal(str)  # la connexion avec ce contact vient de se fermer
     error = Signal(str)
 
     def __init__(
@@ -297,6 +309,29 @@ class Messenger(QObject):
         self._typing_sent[contact_id] = (active, now)
         conn.send(Message.typing(active))
 
+    def is_connected(self, contact_id: str) -> bool:
+        """Connexion établie avec ce contact (nécessaire pour un appel)."""
+        conn = self._connections.get(contact_id)
+        return conn is not None and conn.is_ready
+
+    def send_to(self, contact_id: str, message: Message) -> bool:
+        """Envoie une trame au contact s'il est connecté ; ``False`` sinon."""
+        conn = self._connections.get(contact_id)
+        if conn is None or not conn.is_ready:
+            return False
+        conn.send(message)
+        return True
+
+    def add_call_record(self, contact_id: str, outgoing: bool, call: CallInfo) -> MessageRecord:
+        """Note un appel dans la conversation (localement)."""
+        unread = not outgoing and call.outcome in (CallOutcome.MISSED, CallOutcome.CANCELLED)
+        status = Status.DELIVERED if unread else Status.READ
+        record = MessageRecord(new_id(), contact_id, outgoing, "", now_ms(), status, call=call)
+        self.store.add_message(record)
+        self.message_added.emit(record)
+        self.contacts_changed.emit()
+        return record
+
     def add_contact(self, host: str, port: int) -> None:
         """Se connecte à une adresse ; le contact est créé à sa présentation."""
         conn = self._dial(host, port)
@@ -447,6 +482,15 @@ class Messenger(QObject):
                     self.contacts_changed.emit()
             case MessageType.TYPING:
                 self._set_peer_typing(peer_id, message.active)
+            case (
+                MessageType.CALL_INVITE
+                | MessageType.CALL_RINGING
+                | MessageType.CALL_ACCEPT
+                | MessageType.CALL_SDP
+                | MessageType.CALL_ICE
+                | MessageType.CALL_END
+            ):
+                self.call_frame.emit(peer_id, message)
             case MessageType.AVATAR:
                 if self.store.set_avatar(peer_id, message.data):
                     self.avatar_changed.emit(peer_id)
@@ -495,6 +539,7 @@ class Messenger(QObject):
         if peer_id is not None and self._connections.get(peer_id) is conn:
             del self._connections[peer_id]
             self._typing_sent.pop(peer_id, None)
+            self.peer_disconnected.emit(peer_id)
             if not self.is_online(peer_id):
                 self._set_peer_typing(peer_id, False)
                 self.presence_changed.emit(peer_id, False)

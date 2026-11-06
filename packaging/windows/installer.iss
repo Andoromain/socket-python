@@ -46,7 +46,11 @@ Name: "{group}\Socket Chat"; Filename: "{app}\socket-chat.exe"
 Name: "{autodesktop}\Socket Chat"; Filename: "{app}\socket-chat.exe"; Tasks: desktopicon
 
 [Run]
+; Règles recréées à chaque installation (mise à jour comprise) : pas de doublons.
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Socket Chat"""; Flags: runhidden; Tasks: firewall
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""Socket Chat"" dir=in action=allow program=""{app}\socket-chat.exe"" enable=yes"; Flags: runhidden; Tasks: firewall
+; Appels : le son passe en UDP, par des ports variables, via le moteur de Chrome.
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""Socket Chat"" dir=in action=allow program=""{app}\_internal\PySide6\QtWebEngineProcess.exe"" enable=yes"; Flags: runhidden; Tasks: firewall
 Filename: "{app}\socket-chat.exe"; Description: "{cm:LaunchProgram,Socket Chat}"; Flags: nowait postinstall skipifsilent
 ; Mise à jour automatique : l'application lance l'installeur avec /VERYSILENT /RELAUNCH=1
 ; puis se ferme ; elle est relancée une fois la nouvelle version installée.
