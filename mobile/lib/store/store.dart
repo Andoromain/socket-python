@@ -1,6 +1,7 @@
 // Historique local des contacts et des messages (SQLite), transposé de
 // src/socket_chat/store.py : même schéma, mêmes règles.
 
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -108,6 +109,69 @@ class FileInfo {
   bool get isImage => imageExtensions.contains(extension) && thumb.isNotEmpty;
 }
 
+/// Issue d'un appel, du point de vue de cet appareil (mêmes valeurs que sur PC).
+enum CallOutcome {
+  completed('completed'),
+  missed('missed'),
+  noAnswer('no_answer'),
+  declined('declined'),
+  busy('busy'),
+  cancelled('cancelled'),
+  failed('failed'),
+  unsupported('unsupported');
+
+  const CallOutcome(this.value);
+  final String value;
+
+  static CallOutcome parse(String value) => values.firstWhere((o) => o.value == value, orElse: () => failed);
+}
+
+/// Appel noté dans la conversation (localement, jamais transmis).
+class CallInfo {
+  const CallInfo(this.media, this.outcome, [this.duration = 0]);
+  final String media; // « audio » ou « video »
+  final CallOutcome outcome;
+  final int duration; // secondes de conversation
+
+  String label(bool outgoing) {
+    final kind = media == 'video' ? 'vidéo' : 'audio';
+    return switch (outcome) {
+      CallOutcome.completed => 'Appel $kind · ${formatDuration(duration)}',
+      CallOutcome.missed => 'Appel $kind manqué',
+      CallOutcome.noAnswer => 'Pas de réponse',
+      CallOutcome.declined => 'Appel refusé',
+      CallOutcome.busy => 'Correspondant occupé',
+      CallOutcome.cancelled => outgoing ? 'Appel annulé' : 'Appel $kind manqué',
+      CallOutcome.unsupported => 'Appel impossible : le correspondant doit mettre Socket Chat à jour',
+      CallOutcome.failed => "Échec de l'appel",
+    };
+  }
+
+  String toJson() => jsonEncode({'media': media, 'outcome': outcome.value, 'duration': duration});
+
+  static CallInfo fromJson(String text) {
+    try {
+      final raw = jsonDecode(text) as Map<String, Object?>;
+      return CallInfo(
+        raw['media']! as String,
+        CallOutcome.parse(raw['outcome']! as String),
+        raw['duration'] as int? ?? 0,
+      );
+    } on Object {
+      return const CallInfo('audio', CallOutcome.failed);
+    }
+  }
+}
+
+/// « 42 s », « 3 min 05 », « 1 h 02 min ».
+String formatDuration(int seconds) {
+  if (seconds < 60) return '$seconds s';
+  final minutes = seconds ~/ 60;
+  final secs = (seconds % 60).toString().padLeft(2, '0');
+  if (minutes < 60) return '$minutes min $secs';
+  return '${minutes ~/ 60} h ${(minutes % 60).toString().padLeft(2, '0')} min';
+}
+
 class Contact {
   Contact(this.id, this.name, {this.host, this.port, this.lastSeen = 0, Uint8List? avatar})
     : avatar = avatar ?? Uint8List(0);
@@ -131,6 +195,7 @@ class MessageRecord {
     this.status, {
     this.file,
     this.reactions = const [],
+    this.call,
   });
 
   final String id;
@@ -144,12 +209,17 @@ class MessageRecord {
   /// Réactions : paires (auteur, emoji), l'auteur étant [me] ou l'identifiant du contact.
   final List<(String, String)> reactions;
 
+  /// Appel noté dans la conversation ([text] est alors vide).
+  final CallInfo? call;
+
   bool get unread => !outgoing && status != Status.read;
 
   /// Texte court pour la liste des contacts et les notifications.
   String get preview {
     final f = file;
     if (f != null) return f.isImage ? '🖼 Image' : '📎 ${f.name}';
+    final c = call;
+    if (c != null) return '📞 ${c.label(outgoing)}';
     return text.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).join(' ');
   }
 
@@ -161,7 +231,7 @@ class MessageRecord {
   }
 
   MessageRecord withReactions(List<(String, String)> value) =>
-      MessageRecord(id, contactId, outgoing, text, ts, status, file: file, reactions: value);
+      MessageRecord(id, contactId, outgoing, text, ts, status, file: file, reactions: value, call: call);
 }
 
 class ContactSummary {
@@ -249,15 +319,7 @@ class Store {
     for (final row in rows) {
       MessageRecord? last;
       if (row['m_id'] != null) {
-        last = MessageRecord(
-          row['m_id'] as String,
-          row['id'] as String,
-          row['m_outgoing'] == 1,
-          row['m_text'] as String,
-          row['m_ts'] as int,
-          Status.parse(row['m_status'] as String),
-          file: _file(row, 'm_'),
-        );
+        last = _message(row, 'm_', 'id');
       }
       summaries.add(ContactSummary(_contact(row), last, row['unread'] as int));
     }
@@ -285,6 +347,7 @@ class Store {
   /// Enregistre un message ; renvoie `false` s'il existait déjà (doublon).
   bool addMessage(MessageRecord record) {
     final f = record.file;
+    final c = record.call;
     _db.execute(
       '''
       INSERT OR IGNORE INTO messages
@@ -296,10 +359,10 @@ class Store {
         record.id,
         record.contactId,
         record.outgoing ? 1 : 0,
-        record.text,
+        c != null ? c.toJson() : record.text,
         record.ts,
         record.status.value,
-        f != null ? 'file' : 'text',
+        f != null ? 'file' : (c != null ? 'call' : 'text'),
         f?.name,
         f?.size,
         f?.state.value,
@@ -474,12 +537,17 @@ FileInfo? _file(Row row, [String prefix = '']) {
   );
 }
 
-MessageRecord _message(Row row) => MessageRecord(
-  row['id'] as String,
-  row['contact_id'] as String,
-  row['outgoing'] == 1,
-  row['text'] as String,
-  row['ts'] as int,
-  Status.parse(row['status'] as String),
-  file: _file(row),
-);
+MessageRecord _message(Row row, [String prefix = '', String contactKey = 'contact_id']) {
+  final isCall = row['${prefix}kind'] == 'call';
+  final text = row['${prefix}text'] as String;
+  return MessageRecord(
+    row['${prefix}id'] as String,
+    row[contactKey] as String,
+    row['${prefix}outgoing'] == 1,
+    isCall ? '' : text,
+    row['${prefix}ts'] as int,
+    Status.parse(row['${prefix}status'] as String),
+    file: _file(row, prefix),
+    call: isCall ? CallInfo.fromJson(text) : null,
+  );
+}

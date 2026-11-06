@@ -40,6 +40,14 @@ const int maxThumbSize = 32 * 1024;
 /// Taille maximale d'une photo de profil (octets, avant base64).
 const int maxAvatarSize = 32 * 1024;
 
+/// Taille maximale d'une description de session WebRTC (SDP) et d'un candidat ICE.
+const int maxSdpLength = 16 * 1024;
+const int maxIceLength = 1024;
+
+/// Médias d'appel reconnus et types de description de session.
+const List<String> callMedia = ['audio', 'video'];
+const List<String> sdpKinds = ['offer', 'answer'];
+
 /// Longueur maximale d'un nom de fichier (caractères).
 const int maxFileNameLength = 200;
 
@@ -66,6 +74,12 @@ enum MessageType {
   fileEnd('file_end'),
   fileCancel('file_cancel'),
   avatar('avatar'),
+  callInvite('call_invite'),
+  callRinging('call_ringing'),
+  callAccept('call_accept'),
+  callSdp('call_sdp'),
+  callIce('call_ice'),
+  callEnd('call_end'),
   bye('bye');
 
   const MessageType(this.wire);
@@ -172,6 +186,12 @@ class Message {
     this.offset = 0,
     this.data,
     this.sha256 = '',
+    this.media = '',
+    this.sdpKind = '',
+    this.sdp = '',
+    this.candidate = '',
+    this.mid = '',
+    this.index = 0,
   });
 
   final MessageType type;
@@ -188,6 +208,12 @@ class Message {
   final int offset;
   final Uint8List? data;
   final String sha256;
+  final String media; // call_invite
+  final String sdpKind; // call_sdp : offer / answer
+  final String sdp;
+  final String candidate; // call_ice
+  final String mid;
+  final int index;
 
   bool get accept => active;
 
@@ -210,6 +236,16 @@ class Message {
 
   /// Photo de profil (vide : retirée).
   factory Message.avatar(Uint8List data) => Message(MessageType.avatar, data: data);
+  factory Message.callInvite(String callId, [String media = 'audio']) =>
+      Message(MessageType.callInvite, id: callId, media: media);
+  factory Message.callRinging(String callId) => Message(MessageType.callRinging, id: callId);
+  factory Message.callAccept(String callId) => Message(MessageType.callAccept, id: callId);
+  factory Message.callSdp(String callId, String kind, String sdp) =>
+      Message(MessageType.callSdp, id: callId, sdpKind: kind, sdp: sdp);
+  factory Message.callIce(String callId, String candidate, String mid, int index) =>
+      Message(MessageType.callIce, id: callId, candidate: candidate, mid: mid, index: index);
+  factory Message.callEnd(String callId, [String reason = 'hangup']) =>
+      Message(MessageType.callEnd, id: callId, reason: reason);
   factory Message.bye([String reason = '']) => Message(MessageType.bye, reason: reason);
 
   /// Représentation JSON, dans le même ordre de clés que la version Python.
@@ -240,6 +276,16 @@ class Message {
         return {'type': kind, 'id': id, 'reason': reason};
       case MessageType.avatar:
         return {'type': kind, 'data': base64Encode(data ?? Uint8List(0))};
+      case MessageType.callInvite:
+        return {'type': kind, 'id': id, 'media': media};
+      case MessageType.callRinging || MessageType.callAccept:
+        return {'type': kind, 'id': id};
+      case MessageType.callSdp:
+        return {'type': kind, 'id': id, 'kind': sdpKind, 'sdp': sdp};
+      case MessageType.callIce:
+        return {'type': kind, 'id': id, 'candidate': candidate, 'mid': mid, 'index': index};
+      case MessageType.callEnd:
+        return {'type': kind, 'id': id, 'reason': reason};
       case MessageType.bye:
         return {'type': kind, 'reason': reason};
     }
@@ -441,6 +487,26 @@ Message? decode(List<int> line) {
       final data = _requireBase64(payload, 'data', maxSize: maxAvatarSize);
       if (data.isNotEmpty && !isAvatarImage(data)) throw ProtocolException('Photo de profil invalide.');
       return Message.avatar(data);
+    case MessageType.callInvite:
+      final media = _requireStr(payload, 'media', maxLength: 8);
+      if (!callMedia.contains(media)) throw ProtocolException("Type d'appel invalide.");
+      return Message.callInvite(_requireId(payload), media);
+    case MessageType.callRinging:
+      return Message.callRinging(_requireId(payload));
+    case MessageType.callAccept:
+      return Message.callAccept(_requireId(payload));
+    case MessageType.callSdp:
+      final kind = _requireStr(payload, 'kind', maxLength: 8);
+      final sdp = _requireStr(payload, 'sdp', maxLength: maxSdpLength);
+      if (!sdpKinds.contains(kind) || sdp.isEmpty) throw ProtocolException('Description de session invalide.');
+      return Message.callSdp(_requireId(payload), kind, sdp);
+    case MessageType.callIce:
+      final candidate = _requireStr(payload, 'candidate', maxLength: maxIceLength);
+      final mid = _requireStr(payload, 'mid', maxLength: 32);
+      final index = _requireInt(payload, 'index', maximum: 64);
+      return Message.callIce(_requireId(payload), candidate, mid, index);
+    case MessageType.callEnd:
+      return Message.callEnd(_requireId(payload), _requireStr(payload, 'reason', maxLength: 32));
     case MessageType.bye:
       return Message.bye(_requireStr(payload, 'reason', maxLength: 500));
   }
