@@ -61,7 +61,21 @@ def _fields(message: Message) -> dict[str, object]:
         "offset": message.offset,
         "data": _b64(message.data),
         "sha256": message.sha256,
+        "media": message.media,
+        "sdp_kind": message.sdp_kind,
+        "sdp": message.sdp,
+        "candidate": message.candidate,
+        "mid": message.mid,
+        "index": message.index,
     }
+
+
+SDP = (
+    "v=0\r\no=- 4611731400430051336 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n"
+    "a=group:BUNDLE 0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\nc=IN IP4 0.0.0.0\r\n"
+    "a=rtpmap:111 opus/48000/2\r\na=fmtp:111 minptime=10;useinbandfec=1\r\n"
+)
+ICE = "candidate:842163049 1 udp 1677729535 192.168.1.20 61338 typ host generation 0"
 
 
 VALID = [
@@ -91,6 +105,16 @@ VALID = [
     Message.avatar(b"\x89PNG\r\n\x1a\n" + b"\x00" * 40),
     Message.avatar(b"\xff\xd8\xff" + b"j" * (MAX_AVATAR_SIZE - 3)),
     Message.avatar(b""),
+    Message.call_invite(UID, "audio"),
+    Message.call_invite(UID, "video"),
+    Message.call_ringing(UID),
+    Message.call_accept(UID),
+    Message.call_sdp(UID, "offer", SDP),
+    Message.call_sdp(UID, "answer", SDP),
+    Message.call_ice(UID, ICE, "0", 0),
+    Message.call_ice(UID, "", "", 0),
+    Message.call_end(UID, "hangup"),
+    Message.call_end(UID, "busy"),
     Message.bye("au revoir"),
     Message.bye(),
 ]
@@ -150,6 +174,15 @@ INVALID = [
     _json({"type": "file_end", "id": UID, "sha256": "zz"}),
     _json({"type": "file_end", "id": UID, "sha256": "A" * 64}),
     _json({"type": "file_cancel", "id": UID, "reason": 1}),
+    _json({"type": "call_invite", "id": UID, "media": "fax"}),
+    _json({"type": "call_invite", "media": "audio"}),
+    _json({"type": "call_sdp", "id": UID, "kind": "pranswer", "sdp": "v=0"}),
+    _json({"type": "call_sdp", "id": UID, "kind": "offer", "sdp": ""}),
+    _json({"type": "call_sdp", "id": UID, "kind": "offer", "sdp": "x" * (16 * 1024 + 1)}),
+    _json({"type": "call_ice", "id": UID, "candidate": "c" * 1025, "mid": "0", "index": 0}),
+    _json({"type": "call_ice", "id": UID, "candidate": "c", "mid": "0", "index": 65}),
+    _json({"type": "call_ice", "id": UID, "candidate": "c", "mid": "0", "index": "0"}),
+    _json({"type": "call_end", "id": UID, "reason": "r" * 33}),
     _json({"type": "avatar", "data": 5}),
     _json({"type": "avatar", "data": "pas du base64!"}),
     _json({"type": "avatar", "data": _b64(b"GIF89a" + b"\x00" * 10)}),
