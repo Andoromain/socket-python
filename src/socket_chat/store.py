@@ -8,7 +8,7 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "bmp", "webp"}
 
@@ -46,6 +46,9 @@ _MIGRATIONS = {
         emoji      TEXT NOT NULL,
         PRIMARY KEY (message_id, author)
     );
+    """,
+    3: """
+    ALTER TABLE contacts ADD COLUMN avatar BLOB;
     """,
 }
 
@@ -114,6 +117,8 @@ class Contact:
     host: str | None = None
     port: int | None = None
     last_seen: int = 0
+    #: Photo de profil (JPEG ou PNG) reçue du contact ; vide s'il n'en a pas.
+    avatar: bytes = b""
 
 
 @dataclass(frozen=True)
@@ -244,6 +249,17 @@ class Store:
             summaries.append(ContactSummary(_contact(row), last, row["unread"]))
         summaries.sort(key=lambda s: (-s.last_activity, s.contact.name.casefold()))
         return summaries
+
+    def set_avatar(self, contact_id: str, data: bytes) -> bool:
+        """Enregistre (ou retire avec ``b""``) la photo d'un contact ; ``True`` si modifiée."""
+        contact = self.contact(contact_id)
+        if contact is None or contact.avatar == data:
+            return False
+        with self._db:
+            self._db.execute(
+                "UPDATE contacts SET avatar = ? WHERE id = ?", (data or None, contact_id)
+            )
+        return True
 
     def delete_contact(self, contact_id: str) -> None:
         with self._db:
@@ -403,7 +419,9 @@ class Store:
 
 
 def _contact(row: sqlite3.Row) -> Contact:
-    return Contact(row["id"], row["name"], row["host"], row["port"], row["last_seen"])
+    return Contact(
+        row["id"], row["name"], row["host"], row["port"], row["last_seen"], row["avatar"] or b""
+    )
 
 
 def _file(row: sqlite3.Row, prefix: str = "") -> FileInfo | None:

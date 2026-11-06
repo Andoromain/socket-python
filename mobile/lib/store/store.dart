@@ -6,7 +6,7 @@ import 'dart:typed_data';
 
 import 'package:sqlite3/sqlite3.dart';
 
-const int schemaVersion = 2;
+const int schemaVersion = 3;
 
 const Set<String> imageExtensions = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'};
 
@@ -44,6 +44,9 @@ const Map<int, String> _migrations = {
         emoji      TEXT NOT NULL,
         PRIMARY KEY (message_id, author)
     );
+  ''',
+  3: '''
+    ALTER TABLE contacts ADD COLUMN avatar BLOB;
   ''',
 };
 
@@ -106,12 +109,16 @@ class FileInfo {
 }
 
 class Contact {
-  const Contact(this.id, this.name, {this.host, this.port, this.lastSeen = 0});
+  Contact(this.id, this.name, {this.host, this.port, this.lastSeen = 0, Uint8List? avatar})
+    : avatar = avatar ?? Uint8List(0);
   final String id;
   final String name;
   final String? host;
   final int? port;
   final int lastSeen;
+
+  /// Photo de profil (JPEG ou PNG) reçue du contact ; vide s'il n'en a pas.
+  final Uint8List avatar;
 }
 
 class MessageRecord {
@@ -260,6 +267,14 @@ class Store {
       return a.contact.name.toLowerCase().compareTo(b.contact.name.toLowerCase());
     });
     return summaries;
+  }
+
+  /// Enregistre (ou retire avec une liste vide) la photo d'un contact ; `true` si modifiée.
+  bool setAvatar(String contactId, Uint8List data) {
+    final current = contact(contactId);
+    if (current == null || _sameBytes(current.avatar, data)) return false;
+    _db.execute('UPDATE contacts SET avatar = ? WHERE id = ?', [data.isEmpty ? null : data, contactId]);
+    return true;
   }
 
   void deleteContact(String contactId) {
@@ -431,12 +446,21 @@ class Store {
   }
 }
 
+bool _sameBytes(List<int> a, List<int> b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
+}
+
 Contact _contact(Row row) => Contact(
   row['id'] as String,
   row['name'] as String,
   host: row['host'] as String?,
   port: row['port'] as int?,
   lastSeen: row['last_seen'] as int,
+  avatar: row['avatar'] as Uint8List?,
 );
 
 FileInfo? _file(Row row, [String prefix = '']) {

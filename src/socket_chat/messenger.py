@@ -24,6 +24,7 @@ from .protocol import (
     Message,
     MessageType,
     ProtocolError,
+    is_avatar_image,
     new_id,
     safe_file_name,
     validate_name,
@@ -55,13 +56,23 @@ class Messenger(QObject):
     file_progress = Signal(str, int, int)  # identifiant, octets transférés, taille
     typing_changed = Signal(str, bool)  # contact, en train d'écrire
     presence_changed = Signal(str, bool)  # contact, en ligne
+    avatar_changed = Signal(str)  # contact dont la photo de profil a changé
     error = Signal(str)
 
-    def __init__(self, store: Store, user_id: str, name: str, parent: QObject | None = None):
+    def __init__(
+        self,
+        store: Store,
+        user_id: str,
+        name: str,
+        parent: QObject | None = None,
+        *,
+        avatar: bytes = b"",
+    ):
         super().__init__(parent)
         self.store = store
         self.user_id = user_id
         self._name = validate_name(name)
+        self._avatar = avatar if is_avatar_image(avatar) else b""
         self._server: QTcpServer | None = None
         self._connections: dict[str, PeerConnection] = {}  # contacts identifiés
         self._pending: set[PeerConnection] = set()  # présentation pas encore reçue
@@ -90,6 +101,22 @@ class Messenger(QObject):
     @name.setter
     def name(self, value: str) -> None:
         self._name = validate_name(value)
+
+    @property
+    def avatar(self) -> bytes:
+        """Notre photo de profil (``b""`` : aucune)."""
+        return self._avatar
+
+    def set_avatar(self, data: bytes) -> None:
+        """Change (ou retire avec ``b""``) notre photo et l'envoie aux contacts connectés."""
+        if data and not is_avatar_image(data):
+            raise ValueError("Photo de profil invalide (JPEG ou PNG de 32 Ko au plus).")
+        if data == self._avatar:
+            return
+        self._avatar = data
+        for conn in self._connections.values():
+            if conn.is_ready:
+                conn.send(Message.avatar(data))
 
     @property
     def port(self) -> int | None:
@@ -384,6 +411,8 @@ class Messenger(QObject):
             conn.send(Message.react(message_id, emoji))
         for message_id in self._pending_declines.pop(peer_id, set()):
             conn.send(Message.file_answer(message_id, False))
+        if self._avatar:
+            conn.send(Message.avatar(self._avatar))
 
     def _on_message(self, conn: PeerConnection, message: Message) -> None:
         peer_id = conn.peer_id
@@ -418,6 +447,10 @@ class Messenger(QObject):
                     self.contacts_changed.emit()
             case MessageType.TYPING:
                 self._set_peer_typing(peer_id, message.active)
+            case MessageType.AVATAR:
+                if self.store.set_avatar(peer_id, message.data):
+                    self.avatar_changed.emit(peer_id)
+                    self.contacts_changed.emit()
 
     def _receive_chat(self, conn: PeerConnection, peer_id: str, message: Message) -> None:
         info = None

@@ -208,6 +208,8 @@ class MainWindow(QMainWindow):
             close_to_tray=self.settings.close_to_tray,
             tray_available=self.tray_available,
             first_run=first_run,
+            avatar=self.settings.avatar,
+            user_id=self.settings.user_id,
         )
         if dialog.exec() != SettingsDialog.DialogCode.Accepted:
             return False
@@ -217,6 +219,8 @@ class MainWindow(QMainWindow):
         self.settings.close_to_tray = dialog.close_to_tray
         self.close_to_tray = self.tray_available and dialog.close_to_tray
         self.messenger.name = dialog.name
+        self.settings.avatar = dialog.avatar
+        self.messenger.set_avatar(dialog.avatar)
         if self.discovery is not None:
             self.discovery.set_name(dialog.name)
         if port_changed and not first_run:

@@ -15,6 +15,7 @@ from PySide6.QtGui import (
     QColor,
     QFont,
     QGuiApplication,
+    QImage,
     QPainter,
     QPainterPath,
     QPalette,
@@ -106,6 +107,24 @@ def initials(name: str) -> str:
     return (words[0][0] + words[-1][0]).upper()
 
 
+_PHOTO_CACHE: dict[bytes, QImage] = {}
+_PHOTO_CACHE_SIZE = 200
+
+
+def photo_image(data: bytes) -> QImage | None:
+    """Photo de profil décodée (mise en cache) ; ``None`` si absente ou illisible."""
+    if not data:
+        return None
+    key = hashlib.sha1(data, usedforsecurity=False).digest()
+    image = _PHOTO_CACHE.get(key)
+    if image is None:
+        image = QImage.fromData(data)
+        if len(_PHOTO_CACHE) >= _PHOTO_CACHE_SIZE:
+            _PHOTO_CACHE.clear()
+        _PHOTO_CACHE[key] = image
+    return None if image.isNull() else image
+
+
 def paint_avatar(
     painter: QPainter,
     rect: QRectF,
@@ -114,18 +133,30 @@ def paint_avatar(
     *,
     online: bool | None = None,
     ring: QColor | None = None,
+    photo: bytes = b"",
 ) -> None:
+    """Avatar rond : photo de profil si elle existe, sinon initiales sur fond coloré."""
     painter.save()
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
     painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(avatar_color(key))
-    painter.drawEllipse(rect)
-    font = QFont(painter.font())
-    font.setBold(True)
-    font.setPixelSize(max(8, int(rect.height() * 0.38)))
-    painter.setFont(font)
-    painter.setPen(QColor("#ffffff"))
-    painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, initials(name))
+    image = photo_image(photo)
+    if image is not None:
+        clip = QPainterPath()
+        clip.addEllipse(rect)
+        painter.save()
+        painter.setClipPath(clip)
+        painter.drawImage(rect, image)
+        painter.restore()
+    else:
+        painter.setBrush(avatar_color(key))
+        painter.drawEllipse(rect)
+        font = QFont(painter.font())
+        font.setBold(True)
+        font.setPixelSize(max(8, int(rect.height() * 0.38)))
+        painter.setFont(font)
+        painter.setPen(QColor("#ffffff"))
+        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, initials(name))
     if online:
         size = rect.height() * 0.3
         dot = QRectF(rect.right() - size, rect.bottom() - size, size, size)
@@ -135,12 +166,14 @@ def paint_avatar(
     painter.restore()
 
 
-def avatar_pixmap(name: str, key: str, size: int, device_pixel_ratio: float = 1.0) -> QPixmap:
+def avatar_pixmap(
+    name: str, key: str, size: int, device_pixel_ratio: float = 1.0, photo: bytes = b""
+) -> QPixmap:
     pixmap = QPixmap(int(size * device_pixel_ratio), int(size * device_pixel_ratio))
     pixmap.setDevicePixelRatio(device_pixel_ratio)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
-    paint_avatar(painter, QRectF(0, 0, size, size), name, key)
+    paint_avatar(painter, QRectF(0, 0, size, size), name, key, photo=photo)
     painter.end()
     return pixmap
 

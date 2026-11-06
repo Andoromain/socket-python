@@ -1,14 +1,29 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 
+import '../app/avatar.dart';
 import '../app/controller.dart';
 import '../protocol/protocol.dart';
 import '../version.dart';
+import 'widgets.dart';
+
+/// Choisit une image (galerie ou appareil photo) ; `null` si l'utilisateur renonce.
+typedef ImagePickerCallback = Future<Uint8List?> Function(ImageSource source);
+
+Future<Uint8List?> _pickWithImagePicker(ImageSource source) async {
+  // Réduite dès la sélection : le recadrage reste rapide même pour une photo de 12 Mpx.
+  final file = await ImagePicker().pickImage(source: source, maxWidth: 1024, maxHeight: 1024);
+  return file?.readAsBytes();
+}
 
 /// Nom affiché, port d'écoute et informations utiles pour être ajouté par adresse.
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key, required this.controller});
+  const SettingsScreen({super.key, required this.controller, this.pickImage = _pickWithImagePicker});
   final ChatController controller;
+
+  /// Remplaçable dans les tests (pas de galerie hors d'un appareil).
+  final ImagePickerCallback pickImage;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -39,6 +54,53 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (error == null) Navigator.of(context).pop();
   }
 
+  Future<void> _changePhoto() async {
+    final hasPhoto = widget.controller.settings.avatar.isNotEmpty;
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Choisir dans la galerie'),
+              onTap: () => Navigator.pop(context, 'gallery'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: const Text('Prendre une photo'),
+              onTap: () => Navigator.pop(context, 'camera'),
+            ),
+            if (hasPhoto)
+              ListTile(
+                leading: const Icon(Icons.delete_outline),
+                title: const Text('Retirer la photo'),
+                onTap: () => Navigator.pop(context, 'remove'),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (choice == null || !mounted) return;
+    if (choice == 'remove') {
+      await widget.controller.setAvatar(Uint8List(0));
+    } else {
+      final source = await widget.pickImage(choice == 'camera' ? ImageSource.camera : ImageSource.gallery);
+      if (source == null || !mounted) return;
+      try {
+        await widget.controller.setAvatar(makeAvatar(source));
+      } on ArgumentError catch (error) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${error.message}')));
+        }
+        return;
+      }
+    }
+    if (mounted) setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -50,6 +112,46 @@ class _SettingsScreenState extends State<SettingsScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            Center(
+              child: Semantics(
+                button: true,
+                label: 'Changer la photo de profil',
+                child: InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: _changePhoto,
+                  child: Stack(
+                    children: [
+                      ListenableBuilder(
+                        listenable: _name,
+                        builder: (context, _) => Avatar(
+                          name: _name.text.trim().isEmpty ? '?' : _name.text,
+                          contactId: controller.settings.userId,
+                          size: 96,
+                          photo: controller.settings.avatar,
+                        ),
+                      ),
+                      Positioned(
+                        right: 0,
+                        bottom: 0,
+                        child: CircleAvatar(
+                          radius: 16,
+                          backgroundColor: theme.colorScheme.primary,
+                          child: Icon(Icons.photo_camera, size: 18, color: theme.colorScheme.onPrimary),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Center(
+              child: Text(
+                'Photo de profil, visible par vos collègues',
+                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              ),
+            ),
+            const SizedBox(height: 24),
             TextFormField(
               controller: _name,
               textCapitalization: TextCapitalization.words,

@@ -22,7 +22,7 @@ class ChatController extends ChangeNotifier {
     this.platform = const NetworkPlatform(),
     this.useDiscovery = true,
     this.useNetwork = true,
-  }) : messenger = Messenger(store, settings.userId, settings.name ?? 'Android') {
+  }) : messenger = Messenger(store, settings.userId, settings.name ?? 'Android', avatar: settings.avatar) {
     messenger.contactsChanged.connect((_) => _changed());
     messenger.messageAdded.connect(_onMessageAdded);
     messenger.messageStatusChanged.connect((_) => _changed());
@@ -30,6 +30,7 @@ class ChatController extends ChangeNotifier {
     messenger.fileProgress.connect((_) => _changed());
     messenger.typingChanged.connect((_) => _changed());
     messenger.presenceChanged.connect((_) => _changed());
+    messenger.avatarChanged.connect((_) => _changed());
     messenger.error.connect(errors.emit);
   }
 
@@ -111,6 +112,14 @@ class ChatController extends ChangeNotifier {
     _discovery?.setName(normalized);
     if (portChanged && messenger.running) await stop();
     if (!messenger.running) await start();
+    notifyListeners();
+  }
+
+  /// Change (ou retire avec une liste vide) notre photo de profil et l'envoie aux contacts.
+  Future<void> setAvatar(Uint8List data) async {
+    messenger.setAvatar(data);
+    settings.avatar = data;
+    await settings.save();
     notifyListeners();
   }
 

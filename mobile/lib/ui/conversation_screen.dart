@@ -214,7 +214,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
               titleSpacing: 0,
               title: Row(
                 children: [
-                  Avatar(name: contact.name, contactId: contact.id, online: online, size: 38),
+                  Avatar(name: contact.name, contactId: contact.id, online: online, size: 38, photo: contact.avatar),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(

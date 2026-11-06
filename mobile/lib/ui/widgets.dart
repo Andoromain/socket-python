@@ -1,32 +1,60 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 import '../store/store.dart';
 import 'format.dart';
 
-/// Avatar à initiales, de la même couleur que sur PC, avec point vert si en ligne.
+/// Avatar rond : photo de profil si le contact en a une, sinon initiales sur la même
+/// couleur que sur PC ; point vert si en ligne.
 class Avatar extends StatelessWidget {
-  const Avatar({super.key, required this.name, required this.contactId, this.online = false, this.size = 48});
+  const Avatar({
+    super.key,
+    required this.name,
+    required this.contactId,
+    this.online = false,
+    this.size = 48,
+    this.photo,
+  });
 
   final String name;
   final String contactId;
   final bool online;
   final double size;
 
+  /// Photo de profil (JPEG ou PNG) ; `null` ou vide : initiales.
+  final Uint8List? photo;
+
   @override
   Widget build(BuildContext context) {
     final dot = size * 0.3;
+    final initialsCircle = CircleAvatar(
+      radius: size / 2,
+      backgroundColor: avatarColor(contactId),
+      child: Text(
+        initials(name),
+        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: size * 0.38),
+      ),
+    );
+    final image = photo;
     return SizedBox.square(
       dimension: size,
       child: Stack(
         children: [
-          CircleAvatar(
-            radius: size / 2,
-            backgroundColor: avatarColor(contactId),
-            child: Text(
-              initials(name),
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: size * 0.38),
-            ),
-          ),
+          if (image != null && image.isNotEmpty)
+            ClipOval(
+              child: Image.memory(
+                image,
+                width: size,
+                height: size,
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
+                semanticLabel: 'Photo de $name',
+                errorBuilder: (_, _, _) => initialsCircle, // image illisible : initiales
+              ),
+            )
+          else
+            initialsCircle,
           if (online)
             Positioned(
               right: 0,
