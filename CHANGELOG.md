@@ -1,5 +1,22 @@
 # Journal des modifications
 
+## 3.5.0
+
+Compatible avec la 3.4 (même protocole) : rien ne change sur les postes Windows et Linux.
+
+### Ajouté
+- **Mise à jour proposée par l'application Android**, comme sur PC : vérification au
+  démarrage, au retour dans l'application (au plus toutes les 6 heures) ou depuis
+  Préférences › Rechercher une mise à jour. Un bandeau annonce la nouvelle version
+  (Nouveautés, Plus tard, Mettre à jour) ; l'APK est téléchargé en HTTPS, sa taille et
+  son empreinte SHA-256 sont vérifiées, puis l'installation s'ouvre (Android la fait
+  toujours confirmer). La première fois, l'écran d'autorisation « installer des
+  applications » s'ouvre directement.
+
+### À savoir
+- Depuis une version antérieure, installer la 3.5.0 à la main une dernière fois : les
+  versions suivantes seront proposées par l'application.
+
 ## 3.4.0
 
 Compatible avec la 3.3 (même protocole) : un poste en version antérieure ignore

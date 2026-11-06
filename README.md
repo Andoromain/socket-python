@@ -95,8 +95,14 @@ téléphone doit simplement être sur **le même réseau** (le Wi-Fi de l'entrep
    Play Store.
 3. Au premier lancement, saisir son nom : les collègues du réseau apparaissent.
 
-Pour mettre à jour, installer l'APK de la nouvelle version par-dessus : l'historique
-est conservé. **Si vous aviez installé un APK d'essai** (artefact
+**Mises à jour** : à partir de la 3.5, l'application vérifie elle-même s'il existe une
+nouvelle version (au démarrage, au retour dans l'application, ou depuis Préférences ›
+Rechercher une mise à jour) et l'annonce par un bandeau : **Mettre à jour** télécharge
+l'APK, vérifie taille et empreinte SHA-256, puis ouvre l'installation, qu'Android fait
+toujours confirmer. La première fois, Android demande aussi d'autoriser Socket Chat à
+installer des applications : l'écran s'ouvre tout seul, il suffit d'activer l'option
+puis de revenir. Pour passer d'une version antérieure à la 3.5, installer une dernière
+fois l'APK à la main, par-dessus : l'historique est conservé. **Si vous aviez installé un APK d'essai** (artefact
 `socket-chat-android-test` de GitHub Actions, avant la 3.3.1), désinstallez-le une
 fois : il était signé avec une autre clé et Android refuse de le remplacer.
 
@@ -105,7 +111,7 @@ Déjà disponible : détection des collègues, ajout par adresse, conversations,
 plus tard. Une offre de fichier venant d'un PC s'affiche et peut être refusée.
 
 Pas encore (version suivante) : réception et envoi de fichiers et de photos,
-notifications quand l'application est fermée, mise à jour proposée par l'application.
+notifications quand l'application est fermée.
 
 Limites à connaître :
 
@@ -246,7 +252,7 @@ Conçu pour un **réseau interne de confiance** :
 - Sur **Wi-Fi**, les échanges non chiffrés sont plus exposés qu'en filaire : n'utiliser
   l'application Android que sur le Wi-Fi interne protégé (WPA2/WPA3 entreprise), jamais
   sur un réseau invité ou public.
-- Mise à jour automatique : uniquement en HTTPS (ou depuis un dossier), version
+- Mise à jour automatique (PC et Android) : uniquement en HTTPS (ou depuis un dossier), version
   strictement plus récente, taille et empreinte SHA-256 vérifiées avant toute exécution.
   La confiance repose sur le compte GitHub qui publie : protégez-le (double
   authentification) et limitez le jeton `RELEASES_TOKEN` au seul dépôt public.
