@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../app/avatar.dart';
 import '../app/controller.dart';
+import '../updates/app_updater.dart';
 import '../protocol/protocol.dart';
 import '../version.dart';
 import 'widgets.dart';
@@ -52,6 +53,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final error = widget.controller.startError;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error ?? 'Préférences enregistrées')));
     if (error == null) Navigator.of(context).pop();
+  }
+
+  Future<void> _checkForUpdate(AppUpdater updater) async {
+    final available = await updater.check(manual: true);
+    if (!mounted) return;
+    final String message;
+    if (updater.error case final error?) {
+      message = error;
+    } else if (available) {
+      message = 'Socket Chat ${updater.available!.version} est disponible : voir le bandeau de la liste des contacts.';
+    } else {
+      message = 'Vous avez la dernière version ($appVersion).';
+    }
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _changePhoto() async {
@@ -216,6 +231,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
               title: Text('Version'),
               subtitle: Text('Socket Chat $appVersion · protocole v$protocolVersion'),
             ),
+            if (controller.updater case final updater?)
+              ListenableBuilder(
+                listenable: updater,
+                builder: (context, _) => Align(
+                  alignment: Alignment.centerLeft,
+                  child: OutlinedButton.icon(
+                    onPressed: updater.busy ? null : () => _checkForUpdate(updater),
+                    icon: updater.checking
+                        ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.system_update),
+                    label: const Text('Rechercher une mise à jour'),
+                  ),
+                ),
+              ),
           ],
         ),
       ),

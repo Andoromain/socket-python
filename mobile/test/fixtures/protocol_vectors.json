@@ -695,5 +695,30 @@
   "eyJ0eXBlIjogImFubm91bmNlIiwgInZlcnNpb24iOiAyLCAiaWQiOiAiNmYxYzJjMWUtNmE1MS00ZjZhLTlkM2UtMGM4YjhhM2M5YjEwIiwgIm5hbWUiOiAiQSIsICJwb3J0IjogMX0=",
   "eyJ0eXBlIjogImhlbGxvIiwgInZlcnNpb24iOiAzLCAiaWQiOiAiNmYxYzJjMWUtNmE1MS00ZjZhLTlkM2UtMGM4YjhhM2M5YjEwIn0=",
   "eyJ0eXBlIjogImFubm91bmNlIiwgInZlcnNpb24iOiAzLCAiaWQiOiAiNmYxYzJjMWUtNmE1MS00ZjZhLTlkM2UtMGM4YjhhM2M5YjEwIiwgInBvcnQiOiAxfQ=="
- ]
+ ],
+ "update_manifest": {
+  "url": "https://github.com/andoajpr2/socket-chat-releases/releases/latest/download/latest.json",
+  "manifest": {
+   "version": "9.8.7",
+   "published": "2026-11-06",
+   "notes": "### Ajouté\n- Une nouveauté « accentuée ».",
+   "assets": {
+    "windows-x64": {
+     "name": "socket-chat-9.8.7-windows-setup.exe",
+     "size": 300,
+     "sha256": "43f9b5d59eb108817176c6f65c2c6203a22f2ae8bc28b7a1dde45947678c5042"
+    },
+    "linux-x86_64": {
+     "name": "socket-chat-9.8.7-linux-x86_64.tar.gz",
+     "size": 150,
+     "sha256": "f22b2e614e92d6453612b707385038300293d2cc292b148bc5335754b5ea30fd"
+    },
+    "android": {
+     "name": "socket-chat-9.8.7-android.apk",
+     "size": 210,
+     "sha256": "02d53b4529c38363c1ddc9053e3e58bcb6e3001f01c26aa7c4a9e17884cc71e5"
+    }
+   }
+  }
+ }
 }

@@ -11,8 +11,10 @@ Les tests Python et Dart lisent le même fichier ; un test Python vérifie qu'il
 from __future__ import annotations
 
 import base64
+import importlib.util
 import json
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -187,6 +189,33 @@ ANNOUNCE_INVALID = [
 ]
 
 
+MANIFEST_URL = (
+    "https://github.com/andoajpr2/socket-chat-releases/releases/latest/download/latest.json"
+)
+
+
+def update_manifest() -> dict[str, object]:
+    """Manifeste ``latest.json`` produit par le vrai ``make_latest.py`` (contenu fixe)."""
+    spec = importlib.util.spec_from_file_location(
+        "make_latest", ROOT / "scripts" / "make_latest.py"
+    )
+    assert spec is not None and spec.loader is not None
+    make_latest = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(make_latest)
+    with tempfile.TemporaryDirectory() as tmp:
+        dist = Path(tmp)
+        for name, size in [
+            ("socket-chat-9.8.7-windows-setup.exe", 300),
+            ("socket-chat-9.8.7-linux-x86_64.tar.gz", 150),
+            ("socket-chat-9.8.7-android.apk", 210),
+        ]:
+            (dist / name).write_bytes(bytes(i % 251 for i in range(size)))
+        changelog = dist / "CHANGELOG.md"
+        changelog.write_text("## 9.8.7\n\n### Ajouté\n- Une nouveauté « accentuée ».\n", "utf-8")
+        manifest = make_latest.build_manifest(dist, "9.8.7", changelog, "2026-11-06")
+    return {"url": MANIFEST_URL, "manifest": manifest}
+
+
 def build() -> dict[str, object]:
     valid = []
     for message in VALID:
@@ -228,6 +257,7 @@ def build() -> dict[str, object]:
         "file_names": [[raw, safe_file_name(raw)] for raw in FILE_NAMES],
         "announce_valid": announces,
         "announce_invalid": [_b64(d) for d in ANNOUNCE_INVALID],
+        "update_manifest": update_manifest(),
     }
 
 
