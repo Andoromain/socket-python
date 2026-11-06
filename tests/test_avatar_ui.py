@@ -58,7 +58,8 @@ def center_color(photo: bytes) -> QColor:
     painter = QPainter(canvas)
     paint_avatar(painter, QRectF(0, 0, 64, 64), "Alice Martin", "cle", photo=photo)
     painter.end()
-    return canvas.pixelColor(10, 32)  # à gauche des initiales, dans le cercle
+    # En haut du cercle : hors des initiales (centrées), quelle que soit la police disponible.
+    return canvas.pixelColor(32, 6)
 
 
 def test_paint_avatar_uses_the_photo(qtbot, tmp_path):
