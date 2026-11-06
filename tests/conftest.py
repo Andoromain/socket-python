@@ -4,6 +4,20 @@ import pytest
 
 # Tests sans affichage (CI, serveurs).
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# Appels (Qt WebEngine) : faux micro et autorisation automatique, sans bac à sable
+# (indisponible dans les conteneurs de CI).
+os.environ.setdefault(
+    "QTWEBENGINE_CHROMIUM_FLAGS",
+    "--use-fake-device-for-media-stream --use-fake-ui-for-media-stream",
+)
+os.environ.setdefault("QTWEBENGINE_DISABLE_SANDBOX", "1")
+
+
+def pytest_configure(config):
+    # Qt WebEngine exige ce réglage avant la création de l'application Qt.
+    from PySide6.QtCore import QCoreApplication, Qt
+
+    QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
 
 
 @pytest.fixture

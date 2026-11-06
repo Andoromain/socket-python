@@ -202,7 +202,7 @@ class MessageListModel(QAbstractListModel):
         if role == Role.ITEM:
             return item
         if role == Qt.ItemDataRole.DisplayRole and isinstance(item, MessageItem):
-            return item.record.text
+            return item.record.display_text
         if role == Role.ID and isinstance(item, MessageItem):
             return item.record.id
         if role == Role.PROGRESS and isinstance(item, MessageItem):

@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Socket Chat — média des appels</title>
+<!-- Page invisible : WebRTC (micro, audio du correspondant) et sonnerie, pilotés par
+     Python via QWebChannel (src/socket_chat/call_engine.py). Aucun accès réseau hormis
+     la liaison directe avec le correspondant (pas de serveur STUN/TURN). -->
+</head>
+<body>
+<audio id="remote" autoplay></audio>
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<script>
+"use strict";
+let bridge = null;
+let pc = null;
+let stream = null;
+let pcReady = null;          // promesse résolue quand la connexion est prête
+let remoteSet = false;
+let pendingIce = [];
+let generation = 0;          // ignore les événements d'un appel précédent
+let ringCtx = null;
+let ringTimer = null;
+
+function fail(message) { if (bridge) bridge.failed(message); }
+
+function reset() {
+  generation += 1;
+  if (pc) { try { pc.close(); } catch (e) {} }
+  if (stream) { stream.getTracks().forEach(t => t.stop()); }
+  pc = null; stream = null; remoteSet = false; pendingIce = [];
+  pcReady = null;
+  document.getElementById("remote").srcObject = null;
+}
+
+async function start(caller, media) {
+  reset();
+  const gen = generation;
+  let resolveReady;
+  pcReady = new Promise(r => { resolveReady = r; });
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      video: media === "video",
+    });
+  } catch (e) {
+    if (gen === generation) fail("Micro inaccessible (" + e.name + ") : vérifiez qu'un micro est branché et autorisé.");
+    return;
+  }
+  if (gen !== generation) { stream.getTracks().forEach(t => t.stop()); return; }
+  pc = new RTCPeerConnection({ iceServers: [] });
+  stream.getTracks().forEach(t => pc.addTrack(t, stream));
+  pc.onicecandidate = (e) => {
+    if (gen === generation && e.candidate) {
+      bridge.localIce(e.candidate.candidate, e.candidate.sdpMid || "", e.candidate.sdpMLineIndex || 0);
+    }
+  };
+  pc.ontrack = (e) => {
+    const audio = document.getElementById("remote");
+    audio.srcObject = e.streams[0];
+    audio.play().catch(() => {});
+  };
+  pc.onconnectionstatechange = () => {
+    if (gen !== generation) return;
+    if (pc.connectionState === "connected") bridge.connected();
+    else if (pc.connectionState === "failed") fail("Liaison audio perdue (réseau ou pare-feu).");
+  };
+  resolveReady(pc);
+  if (caller) {
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    if (gen === generation) bridge.localDescription("offer", pc.localDescription.sdp);
+  }
+}
+
+async function remoteDescription(kind, sdp) {
+  const gen = generation;
+  const conn = await pcReady;
+  if (!conn || gen !== generation) return;
+  try {
+    await conn.setRemoteDescription({ type: kind, sdp: sdp });
+    remoteSet = true;
+    for (const c of pendingIce) await conn.addIceCandidate(c);
+    pendingIce = [];
+    if (kind === "offer") {
+      const answer = await conn.createAnswer();
+      await conn.setLocalDescription(answer);
+      if (gen === generation) bridge.localDescription("answer", conn.localDescription.sdp);
+    }
+  } catch (e) {
+    if (gen === generation) fail("Négociation impossible : " + e.message);
+  }
+}
+
+async function remoteIce(candidate, mid, index) {
+  const gen = generation;
+  const conn = await pcReady;
+  if (!conn || gen !== generation) return;
+  const c = { candidate: candidate, sdpMid: mid, sdpMLineIndex: index };
+  if (!remoteSet) { pendingIce.push(c); return; }
+  try { await conn.addIceCandidate(c); } catch (e) { /* candidat inutilisable : ignoré */ }
+}
+
+function setMuted(muted) {
+  if (stream) stream.getAudioTracks().forEach(t => { t.enabled = !muted; });
+}
+
+// Sonnerie : deux tons (440 + 480 Hz), 1 s sur 3, comme un téléphone.
+function ring(on) {
+  if (ringTimer) { clearInterval(ringTimer); ringTimer = null; }
+  if (!on) return;
+  if (!ringCtx) ringCtx = new AudioContext();
+  const beep = () => {
+    const now = ringCtx.currentTime;
+    const gain = ringCtx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.2, now + 0.05);
+    gain.gain.setValueAtTime(0.2, now + 0.95);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.0);
+    gain.connect(ringCtx.destination);
+    for (const f of [440, 480]) {
+      const osc = ringCtx.createOscillator();
+      osc.frequency.value = f;
+      osc.connect(gain);
+      osc.start(now);
+      osc.stop(now + 1.0);
+    }
+  };
+  ringCtx.resume().then(beep);
+  ringTimer = setInterval(beep, 3000);
+}
+
+async function inboundBytes() {
+  if (!pc) return 0;
+  let total = 0;
+  (await pc.getStats()).forEach(r => { if (r.type === "inbound-rtp") total += r.bytesReceived || 0; });
+  return total;
+}
+
+new QWebChannel(qt.webChannelTransport, (channel) => {
+  bridge = channel.objects.engine;
+  bridge.startRequested.connect(start);
+  bridge.remoteDescriptionReceived.connect(remoteDescription);
+  bridge.remoteIceReceived.connect(remoteIce);
+  bridge.muteRequested.connect(setMuted);
+  bridge.stopRequested.connect(reset);
+  bridge.ringRequested.connect(ring);
+  bridge.statsRequested.connect(async () => bridge.stats(await inboundBytes()));
+  bridge.ready();
+});
+</script>
+</body>
+</html>

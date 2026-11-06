@@ -252,6 +252,7 @@ class ConversationView(QWidget):
     """Affiche une conversation ; ne connaît le réseau qu'à travers ``Messenger``."""
 
     message_error = Signal(str)
+    call_requested = Signal(str)  # contact à appeler
 
     def __init__(
         self, messenger: Messenger, settings: Settings | None = None, parent: QWidget | None = None
@@ -333,6 +334,15 @@ class ConversationView(QWidget):
         header_layout.addWidget(self.avatar)
         header_layout.addSpacing(6)
         header_layout.addLayout(titles, 1)
+        self.call_button = QToolButton(header)
+        self.call_button.setText("📞")
+        self.call_button.setAutoRaise(True)
+        self.call_button.setToolTip("Appel audio")
+        self.call_button.setVisible(False)  # affiché si les appels sont disponibles
+        self.call_button.clicked.connect(
+            lambda: self.contact_id and self.call_requested.emit(self.contact_id)
+        )
+        header_layout.addWidget(self.call_button)
 
         separator = QFrame(page)
         separator.setFrameShape(QFrame.Shape.HLine)
@@ -609,6 +619,9 @@ class ConversationView(QWidget):
         else:
             status = "hors ligne — vos messages lui seront remis à sa reconnexion"
         self.status_label.setText(status)
+        online = self._messenger.is_connected(contact.id) or self._messenger.is_online(contact.id)
+        self.call_button.setEnabled(online)
+        self.call_button.setToolTip("Appel audio" if online else "Appel audio : contact hors ligne")
 
     def changeEvent(self, event: QEvent) -> None:  # noqa: N802 - API Qt
         if event.type() == QEvent.Type.PaletteChange and hasattr(self, "list"):

@@ -215,6 +215,13 @@ class MessageRecord:
             return f"📞 {self.call.label(self.outgoing)}"
         return " ".join(self.text.split())
 
+    @property
+    def display_text(self) -> str:
+        """Texte de la bulle : le message, ou la mention d'un appel."""
+        if self.call is not None:
+            return f"📞 {self.call.label(self.outgoing)}"
+        return self.text
+
     def reaction_of(self, author: str) -> str:
         return dict(self.reactions).get(author, "")
 

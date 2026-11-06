@@ -67,7 +67,7 @@ def _instance_name() -> str:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
 
-    from PySide6.QtCore import QStandardPaths
+    from PySide6.QtCore import QCoreApplication, QStandardPaths, Qt
     from PySide6.QtGui import QIcon
     from PySide6.QtNetwork import QLocalServer, QLocalSocket
     from PySide6.QtWidgets import QApplication, QMessageBox
@@ -86,6 +86,8 @@ def main(argv: list[str] | None = None) -> int:
     QApplication.setApplicationVersion(__version__)
     QApplication.setDesktopFileName("socket-chat")
 
+    # Qt WebEngine (appels) exige ce réglage avant la création de l'application.
+    QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
     app = QApplication([sys.argv[0], *args.qt_args])
     icon = QIcon(icon_path())
     app.setWindowIcon(icon)
@@ -130,7 +132,19 @@ def main(argv: list[str] | None = None) -> int:
     else:
         log.warning("Détection automatique indisponible : ajout par adresse uniquement")
 
-    window = MainWindow(settings, messenger, discovery)
+    calls = None
+    ring = None
+    try:
+        from .call_engine import CallHost, WebEngineCallEngine
+        from .calls import CallManager
+
+        call_host = CallHost(messenger)
+        calls = CallManager(messenger, lambda: WebEngineCallEngine(call_host), messenger)
+        ring = call_host.ring
+    except ImportError as exc:  # installation sans Qt WebEngine : pas d'appels
+        log.warning("Appels indisponibles : %s", exc)
+
+    window = MainWindow(settings, messenger, discovery, calls=calls, ring=ring)
     banner = UpdateBanner(window)
     window.add_banner(banner)
     updates = UpdateController(settings, messenger, banner, window)
@@ -169,6 +183,8 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     def shutdown() -> None:
+        if calls is not None:
+            calls.stop()
         updates.stop()
         discovery.stop()
         messenger.stop()

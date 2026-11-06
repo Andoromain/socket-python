@@ -150,7 +150,7 @@ class BubbleDelegate(QStyledItemDelegate):
     def _meta_size(self, record: MessageRecord) -> tuple[float, float]:
         metrics = QFontMetricsF(self._meta_font())
         width = metrics.horizontalAdvance(clock(record.ts))
-        if record.outgoing:
+        if record.outgoing and record.call is None:
             width += 4 + ticks_width(metrics.height() * 0.85)
         return width, metrics.height()
 
@@ -192,7 +192,7 @@ class BubbleDelegate(QStyledItemDelegate):
         return layout
 
     def _text_layout(self, record: MessageRecord, max_width: int) -> _Layout:
-        count = emoji_count(record.text)
+        count = emoji_count(record.display_text)
         jumbo = 0 < count <= 3
         doc = QTextDocument()
         doc.setDefaultFont(
@@ -202,7 +202,7 @@ class BubbleDelegate(QStyledItemDelegate):
         option = QTextOption()
         option.setWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
         doc.setDefaultTextOption(option)
-        doc.setPlainText(record.text)  # jamais interprété comme du HTML
+        doc.setPlainText(record.display_text)  # jamais interprété comme du HTML
         doc.setTextWidth(max_width)
         ideal = min(max_width, doc.idealWidth())
         doc.setTextWidth(ideal + 1)
@@ -390,7 +390,7 @@ class BubbleDelegate(QStyledItemDelegate):
         painter.drawText(
             meta_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, clock(record.ts)
         )
-        if outgoing:
+        if outgoing and record.call is None:  # pas de coches sur la mention d'un appel
             tick_h = metrics.height() * 0.85
             tick_rect = QRectF(
                 meta_rect.right() - ticks_width(tick_h),
@@ -557,7 +557,7 @@ class BubbleDelegate(QStyledItemDelegate):
             and item.record.file is None
             and self.bubble_rect(rect, item).contains(pos)
         ):
-            return item.record.text
+            return item.record.display_text
         return None
 
 
