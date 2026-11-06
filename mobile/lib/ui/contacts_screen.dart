@@ -191,7 +191,12 @@ class ContactTile extends StatelessWidget {
       onTap: onTap,
       onLongPress: onLongPress,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      leading: Avatar(name: summary.contact.name, contactId: summary.contact.id, online: online),
+      leading: Avatar(
+        name: summary.contact.name,
+        contactId: summary.contact.id,
+        online: online,
+        photo: summary.contact.avatar,
+      ),
       title: Text(
         summary.contact.name,
         maxLines: 1,
