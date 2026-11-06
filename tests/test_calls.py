@@ -24,18 +24,28 @@ class FakeEngine(MediaEngine):
         self.stopped = False
         FakeEngine.instances.append(self)
 
+    def _later(self, ms, emit):
+        """Émission différée, annulée si le moteur est arrêté ou détruit entre-temps
+        (CallManager détruit le moteur d'un appel terminé par deleteLater)."""
+
+        def fire():
+            if not self.stopped:
+                emit()
+
+        QTimer.singleShot(ms, self, fire)  # contexte : minuteur annulé avec le moteur
+
     def start(self, caller, media):
         self.media = media
         if caller:
-            QTimer.singleShot(0, lambda: self.local_description.emit("offer", "v=0 offre"))
-        QTimer.singleShot(
+            self._later(0, lambda: self.local_description.emit("offer", "v=0 offre"))
+        self._later(
             0, lambda: self.local_ice.emit("candidate:1 1 udp 1 10.0.0.1 1 typ host", "0", 0)
         )
 
     def set_remote_description(self, kind, sdp):
         if kind == "offer":
-            QTimer.singleShot(0, lambda: self.local_description.emit("answer", "v=0 réponse"))
-        QTimer.singleShot(10, self.connected.emit)
+            self._later(0, lambda: self.local_description.emit("answer", "v=0 réponse"))
+        self._later(10, self.connected.emit)
 
     def add_remote_ice(self, candidate, mid, index):
         self.remote_ice.append((candidate, mid, index))
@@ -210,3 +220,14 @@ def test_start_call_errors(qtbot, phones, make_messenger):
     alice.start_call(ids(bob))
     with pytest.raises(ValueError, match="déjà en cours"):
         alice.start_call(ids(bob))
+
+
+def test_fake_engine_deleted_with_pending_emits(qtbot):
+    """Un moteur détruit (fin d'appel) n'émet plus rien, même s'il avait des émissions
+    en attente : sinon « Signal source has been deleted » sur une machine lente."""
+    engine = FakeEngine()
+    engine.start(True, "audio")
+    engine.set_remote_description("offer", "v=0")
+    engine.stop()
+    engine.deleteLater()  # comme CallManager._finish
+    qtbot.wait(50)
