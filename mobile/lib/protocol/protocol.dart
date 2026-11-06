@@ -37,6 +37,9 @@ const int chunkSize = 32 * 1024;
 /// Taille maximale de l'aperçu d'une image (octets, avant base64).
 const int maxThumbSize = 32 * 1024;
 
+/// Taille maximale d'une photo de profil (octets, avant base64).
+const int maxAvatarSize = 32 * 1024;
+
 /// Longueur maximale d'un nom de fichier (caractères).
 const int maxFileNameLength = 200;
 
@@ -62,6 +65,7 @@ enum MessageType {
   fileChunk('file_chunk'),
   fileEnd('file_end'),
   fileCancel('file_cancel'),
+  avatar('avatar'),
   bye('bye');
 
   const MessageType(this.wire);
@@ -203,6 +207,9 @@ class Message {
       Message(MessageType.fileEnd, id: messageId, sha256: sha256);
   factory Message.fileCancel(String messageId, [String reason = '']) =>
       Message(MessageType.fileCancel, id: messageId, reason: reason);
+
+  /// Photo de profil (vide : retirée).
+  factory Message.avatar(Uint8List data) => Message(MessageType.avatar, data: data);
   factory Message.bye([String reason = '']) => Message(MessageType.bye, reason: reason);
 
   /// Représentation JSON, dans le même ordre de clés que la version Python.
@@ -231,6 +238,8 @@ class Message {
         return {'type': kind, 'id': id, 'sha256': sha256};
       case MessageType.fileCancel:
         return {'type': kind, 'id': id, 'reason': reason};
+      case MessageType.avatar:
+        return {'type': kind, 'data': base64Encode(data ?? Uint8List(0))};
       case MessageType.bye:
         return {'type': kind, 'reason': reason};
     }
@@ -360,6 +369,24 @@ void _checkVersion(Map<String, Object?> payload) {
 }
 
 final RegExp _sha256 = RegExp(r'^[0-9a-f]{64}$');
+
+const List<List<int>> _imageSignatures = [
+  [0xff, 0xd8, 0xff], // JPEG
+  [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], // PNG
+];
+
+/// Vrai si [data] ressemble à une photo de profil acceptable (JPEG ou PNG).
+bool isAvatarImage(List<int> data) {
+  if (data.isEmpty || data.length > maxAvatarSize) return false;
+  return _imageSignatures.any((signature) {
+    if (data.length < signature.length) return false;
+    for (var i = 0; i < signature.length; i++) {
+      if (data[i] != signature[i]) return false;
+    }
+    return true;
+  });
+}
+
 final RegExp _letterDigitSpace = RegExp(r'[\p{L}\p{N}\s]', unicode: true);
 
 /// Décode une trame TCP (sans le séparateur) ; `null` si son type est inconnu.
@@ -410,6 +437,10 @@ Message? decode(List<int> line) {
     case MessageType.fileCancel:
       final reason = _requireStr(payload, 'reason', maxLength: 500);
       return Message.fileCancel(_requireId(payload), reason);
+    case MessageType.avatar:
+      final data = _requireBase64(payload, 'data', maxSize: maxAvatarSize);
+      if (data.isNotEmpty && !isAvatarImage(data)) throw ProtocolException('Photo de profil invalide.');
+      return Message.avatar(data);
     case MessageType.bye:
       return Message.bye(_requireStr(payload, 'reason', maxLength: 500));
   }

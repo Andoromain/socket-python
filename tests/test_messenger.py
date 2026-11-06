@@ -213,3 +213,34 @@ def test_new_address_replaces_stale_connection_attempt(qtbot, make_messenger):
     assert blocker.args[0].id == record.id
     black_hole.close()
     black_hole.deleteLater()
+
+
+JPEG = b"\xff\xd8\xff\xe0" + b"photo" * 100
+
+
+def test_profile_photos_are_exchanged_and_updated(qtbot, make_messenger):
+    alice, bob = make_messenger("Alice"), make_messenger("Bob")
+    alice.set_avatar(JPEG)  # avant la connexion : envoyée dès qu'elle est prête
+    with qtbot.waitSignal(bob.avatar_changed, timeout=TIMEOUT) as blocker:
+        alice.add_contact("127.0.0.1", bob.port)
+    assert blocker.args == [alice.user_id]
+    assert bob.store.contact(alice.user_id).avatar == JPEG
+    assert alice.store.contact(bob.user_id).avatar == b""  # Bob n'a pas de photo
+
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 50
+    with qtbot.waitSignal(alice.avatar_changed, timeout=TIMEOUT):
+        bob.set_avatar(png)
+    assert alice.store.contact(bob.user_id).avatar == png
+
+    with qtbot.waitSignal(bob.avatar_changed, timeout=TIMEOUT):
+        alice.set_avatar(b"")  # photo retirée
+    assert bob.store.contact(alice.user_id).avatar == b""
+
+
+def test_invalid_profile_photo_is_refused(make_messenger):
+    alice = make_messenger("Alice", start=False)
+    with pytest.raises(ValueError):
+        alice.set_avatar(b"GIF89a")
+    with pytest.raises(ValueError):
+        alice.set_avatar(b"\xff\xd8\xff" + b"x" * 40_000)
+    assert alice.avatar == b""

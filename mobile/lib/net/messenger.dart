@@ -38,8 +38,9 @@ typedef Thumbnailer = Uint8List Function(String path);
 Uint8List _noThumbnail(String path) => Uint8List(0);
 
 class Messenger {
-  Messenger(this.store, this.userId, String name, {this.thumbnailer = _noThumbnail})
+  Messenger(this.store, this.userId, String name, {this.thumbnailer = _noThumbnail, Uint8List? avatar})
     : _name = validateName(name),
+      _avatar = avatar != null && isAvatarImage(avatar) ? avatar : Uint8List(0),
       transfers = FileTransfers(store) {
     transfers.changed.connect(_onTransferChanged);
     transfers.progress.connect(fileProgress.emit);
@@ -69,6 +70,9 @@ class Messenger {
 
   /// Contact, en ligne.
   final Signal<(String, bool)> presenceChanged = Signal();
+
+  /// Contact dont la photo de profil a changé.
+  final Signal<String> avatarChanged = Signal();
   final Signal<String> error = Signal();
 
   RawServerSocket? _server;
@@ -89,6 +93,22 @@ class Messenger {
   // -- Propriétés ------------------------------------------------------
   String get name => _name;
   set name(String value) => _name = validateName(value);
+
+  Uint8List _avatar;
+
+  /// Notre photo de profil (vide : aucune).
+  Uint8List get avatar => _avatar;
+
+  /// Change (ou retire avec une liste vide) notre photo et l'envoie aux contacts connectés.
+  void setAvatar(Uint8List data) {
+    if (data.isNotEmpty && !isAvatarImage(data)) {
+      throw ArgumentError('Photo de profil invalide (JPEG ou PNG de 32 Ko au plus).');
+    }
+    _avatar = data;
+    for (final conn in _connections.values) {
+      if (conn.isReady) conn.send(Message.avatar(data));
+    }
+  }
 
   int? get port => _server?.port;
   bool get running => _server != null;
@@ -380,6 +400,7 @@ class Messenger {
     for (final messageId in _pendingDeclines.remove(peerId) ?? <String>{}) {
       conn.send(Message.fileAnswer(messageId, false));
     }
+    if (_avatar.isNotEmpty) conn.send(Message.avatar(_avatar));
   }
 
   void _onMessage(PeerConnection conn, Message message) {
@@ -405,6 +426,11 @@ class Messenger {
         }
       case MessageType.typing:
         _setPeerTyping(peerId, message.active);
+      case MessageType.avatar:
+        if (store.setAvatar(peerId, message.data ?? Uint8List(0))) {
+          avatarChanged.emit(peerId);
+          contactsChanged.emit(null);
+        }
       case MessageType.hello || MessageType.bye:
         break;
     }

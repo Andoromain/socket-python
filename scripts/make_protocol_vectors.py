@@ -20,6 +20,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from socket_chat.protocol import (  # noqa: E402
     CHUNK_SIZE,
+    MAX_AVATAR_SIZE,
     MAX_TEXT_LENGTH,
     PROTOCOL_VERSION,
     AckStatus,
@@ -84,6 +85,10 @@ VALID = [
     Message.file_chunk(UID, CHUNK_SIZE, bytes(range(256)) * 4),
     Message.file_end(UID, "a" * 64),
     Message.file_cancel(UID, "integrity"),
+    Message.avatar(b"\xff\xd8\xff\xe0" + bytes(range(256)) * 8),
+    Message.avatar(b"\x89PNG\r\n\x1a\n" + b"\x00" * 40),
+    Message.avatar(b"\xff\xd8\xff" + b"j" * (MAX_AVATAR_SIZE - 3)),
+    Message.avatar(b""),
     Message.bye("au revoir"),
     Message.bye(),
 ]
@@ -143,6 +148,10 @@ INVALID = [
     _json({"type": "file_end", "id": UID, "sha256": "zz"}),
     _json({"type": "file_end", "id": UID, "sha256": "A" * 64}),
     _json({"type": "file_cancel", "id": UID, "reason": 1}),
+    _json({"type": "avatar", "data": 5}),
+    _json({"type": "avatar", "data": "pas du base64!"}),
+    _json({"type": "avatar", "data": _b64(b"GIF89a" + b"\x00" * 10)}),
+    _json({"type": "avatar", "data": _b64(b"\xff\xd8\xff" + b"j" * MAX_AVATAR_SIZE)}),
 ]
 
 UNKNOWN = [b'{"type": "sticker", "id": "x"}', b'{"type": "future"}']

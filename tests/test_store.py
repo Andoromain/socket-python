@@ -184,3 +184,38 @@ def test_migration_from_schema_1(tmp_path):
     assert store.set_reaction("m1", ME, "👍")
     store.add_message(file_msg(2))
     assert store._db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+
+
+JPEG = b"\xff\xd8\xff\xe0photo"
+
+
+def test_contact_avatar():
+    store = Store()
+    store.upsert_contact(A, "Alice")
+    assert store.contact(A).avatar == b""
+    assert store.set_avatar(A, JPEG)
+    assert not store.set_avatar(A, JPEG)
+    assert store.contact(A).avatar == JPEG
+    store.upsert_contact(A, "Alice Martin", host="10.0.0.1")  # la photo est conservée
+    assert store.contacts()[0].contact.avatar == JPEG
+    assert store.set_avatar(A, b"")
+    assert store.contact(A).avatar == b""
+    assert not store.set_avatar(B, JPEG)  # contact inconnu
+
+
+def test_migration_from_schema_2(tmp_path):
+    """Une base de la 3.1 à la 3.3 (schéma 2) reçoit la colonne des photos."""
+    path = tmp_path / "v2.sqlite3"
+    old = Store(path)
+    old.upsert_contact(A, "Alice", host="10.0.0.1", port=12800)
+    old.add_message(msg(1))
+    old.close()
+    db = sqlite3.connect(path)
+    db.executescript("ALTER TABLE contacts DROP COLUMN avatar; PRAGMA user_version = 2;")
+    db.close()
+
+    store = Store(path)
+    assert store.contact(A).host == "10.0.0.1"
+    assert [m.text for m in store.messages(A)] == ["m1"]
+    assert store.set_avatar(A, JPEG)
+    assert store._db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 3
