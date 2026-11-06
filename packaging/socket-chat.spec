@@ -14,6 +14,20 @@ a = Analysis(
     excludes=["tkinter", "unittest", "pydoc", "PySide6.QtQml", "PySide6.QtQuick"],
     noarchive=False,
 )
+
+
+def _needed(dest: str) -> bool:
+    """Allège Qt WebEngine : français et anglais seulement, sans outils de développement."""
+    path = dest.replace("\\", "/")
+    name = path.rsplit("/", 1)[-1]
+    if "/qtwebengine_locales/" in path:
+        return name in ("fr.pak", "en-US.pak")
+    if "/translations/" in path:
+        return name.endswith("_fr.qm")
+    return name != "qtwebengine_devtools_resources.pak"
+
+
+a.datas = [entry for entry in a.datas if _needed(entry[0])]
 pyz = PYZ(a.pure)
 
 exe = EXE(

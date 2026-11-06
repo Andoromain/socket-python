@@ -88,3 +88,13 @@ def test_ringtone_starts_and_stops(qtbot, phones):
     alice_host.ring(True)  # pas d'exception côté page : vérifié par l'absence d'échec
     alice_host.ring(False)
     assert inbound_bytes(qtbot, alice_host) == 0
+
+
+def test_check_calls_option(qapp):
+    """``socket-chat --check-calls`` (vérification de l'exécutable construit)."""
+    from socket_chat.app import check_calls
+
+    code = check_calls(timeout_ms=TIMEOUT)
+    if code and not os.environ.get("SOCKET_CHAT_REQUIRE_WEBENGINE"):
+        pytest.skip("Qt WebEngine ne démarre pas sur cette machine")
+    assert code == 0

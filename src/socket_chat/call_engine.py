@@ -99,8 +99,9 @@ class CallHost(QObject):
     def ensure_page(self) -> None:
         if self._page is not None:
             return
-        profile = QWebEngineProfile(self)  # sans nom : rien n'est écrit sur le disque
+        profile = QWebEngineProfile()  # sans nom : rien n'est écrit sur le disque
         page = QWebEnginePage(profile, self)
+        profile.setParent(page)  # détruit après la page, comme l'exige WebEngine
         page.settings().setAttribute(
             QWebEngineSettings.WebAttribute.PlaybackRequiresUserGesture, False
         )
