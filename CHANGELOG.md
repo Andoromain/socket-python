@@ -1,5 +1,18 @@
 # Journal des modifications
 
+## 3.4.0
+
+Compatible avec la 3.3 (même protocole) : un poste en version antérieure ignore
+simplement les photos.
+
+### Ajouté
+- **Photo de profil**, sur PC et sur Android : chacun choisit la sienne dans les
+  Préférences (fichier image sur PC ; galerie ou appareil photo sur Android). Elle est
+  recadrée en carré, réduite, puis envoyée automatiquement aux collègues, qui la voient
+  à la place des initiales dans la liste des contacts et l'en-tête de conversation. Un
+  changement ou un retrait est transmis aussitôt aux collègues connectés, et aux autres
+  à leur prochaine connexion.
+
 ## 3.3.1
 
 Compatible avec la 3.3 (même protocole) : rien ne change sur les postes Windows et Linux.

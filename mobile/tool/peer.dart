@@ -11,10 +11,11 @@
 //   {"cmd": "read", "contact": "<id>"}
 //   {"cmd": "react", "id": "<message>", "emoji": "👍"}
 //   {"cmd": "typing", "to": "<id>", "active": true}
+//   {"cmd": "avatar", "data": "<base64>"}          (vide : photo retirée)
 //   {"cmd": "discover", "target_port": 45678}
 //   {"cmd": "quit"}
 // Événements (une ligne JSON par événement sur la sortie standard) : started,
-// presence, message, status, changed, typing, error, result, discovery.
+// presence, message, status, changed, typing, avatar, error, result, discovery.
 
 import 'dart:async';
 import 'dart:convert';
@@ -53,6 +54,9 @@ Future<void> main(List<String> args) async {
   messenger.messageStatusChanged.connect((s) => emit('status', {'id': s.$1, 'status': s.$2.value}));
   messenger.messageChanged.connect((id) => emit('changed', describe(store.message(id)!)));
   messenger.typingChanged.connect((t) => emit('typing', {'contact': t.$1, 'active': t.$2}));
+  messenger.avatarChanged.connect(
+    (id) => emit('avatar', {'contact': id, 'data': base64Encode(store.contact(id)!.avatar)}),
+  );
   messenger.error.connect((message) => emit('error', {'message': message}));
 
   if (!await messenger.start(0)) exit(1);
@@ -82,6 +86,8 @@ Future<void> main(List<String> args) async {
             messenger.react(command['id']! as String, command['emoji']! as String);
           case 'typing':
             messenger.setTyping(command['to']! as String, command['active']! as bool);
+          case 'avatar':
+            messenger.setAvatar(base64Decode(command['data']! as String));
           case 'discover':
             final d = Discovery(
               messenger.userId,

@@ -9,6 +9,8 @@ central :
 - messages en **bulles**, indications **« écrit… »**, accusés **✓ envoyé, ✓✓ remis,
   ✓✓ bleu lu** ;
 - un message écrit à un collègue absent lui est **remis à son retour** ;
+- **photo de profil** : chacun choisit la sienne, ses collègues la voient à la place
+  des initiales ;
 - **emojis** (sélecteur avec recherche, `:)` → 🙂) et **réactions** sur les messages
   (👍 ❤️ 😂…) ;
 - **envoi de fichiers et d'images** (bouton 📎, glisser-déposer, Ctrl+V d'une capture) :
@@ -24,6 +26,8 @@ clair ou sombre selon le système.
 | ![Capture en thème clair](docs/capture-clair.png) | ![Capture en thème sombre](docs/capture-sombre.png) |
 
 <p align="center"><img src="docs/emojis.png" alt="Sélecteur d'emojis" width="370"></p>
+
+<p align="center"><img src="docs/photos-profil.png" alt="Photos de profil dans la liste des contacts" width="600"></p>
 
 **Nouveau : application Android** (en test, voir [Android](#android-en-test)). Un téléphone
 sur le Wi-Fi de l'entreprise converse avec les postes Windows et Linux.
@@ -188,6 +192,7 @@ Pour un dossier réseau, y copier les fichiers de la Release (installeurs et
 | Recevoir un fichier | **Accepter** (on choisit où l'enregistrer) ou **Refuser** dans la bulle ; puis **Ouvrir** / **Dossier** |
 | Copier un message | Clic droit sur la bulle |
 | Changer de nom, de port, le comportement à la fermeture | **Socket Chat › Préférences…** |
+| Mettre ou retirer sa photo de profil | **Socket Chat › Préférences…** › Choisir une photo… (sur Android : Préférences, toucher la pastille) |
 | Quitter vraiment | **Socket Chat › Quitter** (`Ctrl+Q`) ou clic droit sur l'icône de notification |
 
 - Au premier lancement, l'application demande le nom affiché chez vos collègues.
@@ -233,6 +238,9 @@ Conçu pour un **réseau interne de confiance** :
 - Les échanges **ne sont pas chiffrés** et les correspondants ne sont pas authentifiés
   (le nom et l'identifiant annoncés sont déclaratifs). Ne pas l'utiliser pour des
   informations confidentielles ni l'exposer sur Internet.
+- Photo de profil : envoyée à chaque collègue avec qui l'on converse (pas de diffusion
+  sur le réseau) ; réduite à 256 px et 32 Kio. Seules des images JPEG ou PNG sont
+  acceptées des autres postes ; une image illisible est remplacée par les initiales.
 - L'historique est stocké en clair dans le profil de l'utilisateur (sur Android, dans
   l'espace privé de l'application).
 - Sur **Wi-Fi**, les échanges non chiffrés sont plus exposés qu'en filaire : n'utiliser

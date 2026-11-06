@@ -8,6 +8,7 @@ les dépendances Flutter n'ont pas été récupérées (``flutter pub get`` dans
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -199,6 +200,25 @@ def test_pc_dials_phone_and_sees_it_leave(qtbot, make_messenger, phone):
         pc.presence_changed, check_params_cb=lambda cid, online: not online, timeout=TIMEOUT
     ):
         phone.close()  # « bye » puis fermeture
+
+
+def test_profile_photos_in_both_directions(qtbot, make_messenger, phone):
+    jpeg = b"\xff\xd8\xff\xe0" + os.urandom(20_000)
+    pc = make_messenger("Poste PC")
+    pc.set_avatar(jpeg)  # envoyée dès que la connexion est prête
+    with qtbot.waitSignal(pc.presence_changed, timeout=TIMEOUT):
+        phone.command("connect", host="127.0.0.1", port=pc.port)
+    received = phone.wait(qtbot, "avatar", contact=pc.user_id)
+    assert base64.b64decode(received["data"]) == jpeg
+
+    png = b"\x89PNG\r\n\x1a\n" + os.urandom(5_000)
+    with qtbot.waitSignal(pc.avatar_changed, timeout=TIMEOUT):
+        phone.command("avatar", data=base64.b64encode(png).decode())
+    assert pc.store.contact(phone.id).avatar == png
+
+    with qtbot.waitSignal(pc.avatar_changed, timeout=TIMEOUT):
+        phone.command("avatar", data="")  # photo retirée
+    assert pc.store.contact(phone.id).avatar == b""
 
 
 def test_udp_discovery_between_pc_and_phone(qtbot, make_messenger, phone):
