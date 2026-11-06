@@ -8,6 +8,7 @@ import '../net/discovery.dart';
 import '../net/messenger.dart';
 import '../protocol/protocol.dart';
 import '../store/store.dart';
+import '../updates/app_updater.dart';
 import 'platform.dart';
 import 'settings.dart';
 
@@ -22,6 +23,7 @@ class ChatController extends ChangeNotifier {
     this.platform = const NetworkPlatform(),
     this.useDiscovery = true,
     this.useNetwork = true,
+    this.updater,
   }) : messenger = Messenger(store, settings.userId, settings.name ?? 'Android', avatar: settings.avatar) {
     messenger.contactsChanged.connect((_) => _changed());
     messenger.messageAdded.connect(_onMessageAdded);
@@ -44,6 +46,14 @@ class ChatController extends ChangeNotifier {
   final Messenger messenger;
   Discovery? _discovery;
 
+  /// Mise à jour de l'application ; `null` hors Android (tests).
+  final AppUpdater? updater;
+  Timer? _firstUpdateCheck;
+  Timer? _periodicUpdateCheck;
+
+  /// Délai avant la première vérification de mise à jour après le démarrage.
+  static const Duration firstUpdateCheckDelay = Duration(seconds: 15);
+
   /// Messages d'erreur à afficher (barre en bas de l'écran).
   final Signal<String> errors = Signal();
 
@@ -62,6 +72,7 @@ class ChatController extends ChangeNotifier {
   // -- Cycle de vie ----------------------------------------------------
   Future<void> start() async {
     if (needsName || messenger.running) return;
+    _scheduleUpdateChecks(); // indépendant de la messagerie (port occupé…)
     if (!useNetwork) {
       notifyListeners();
       return;
@@ -129,7 +140,15 @@ class ChatController extends ChangeNotifier {
     if (visible) {
       _markOpenRead();
       _discovery?.announce();
+      if (_firstUpdateCheck != null && !_firstUpdateCheck!.isActive) updater?.check();
     }
+  }
+
+  void _scheduleUpdateChecks() {
+    final updater = this.updater;
+    if (updater == null || _firstUpdateCheck != null) return;
+    _firstUpdateCheck = Timer(firstUpdateCheckDelay, updater.check);
+    _periodicUpdateCheck = Timer.periodic(checkInterval, (_) => updater.check());
   }
 
   // -- Conversation ouverte --------------------------------------------
@@ -199,6 +218,8 @@ class ChatController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _firstUpdateCheck?.cancel();
+    _periodicUpdateCheck?.cancel();
     stop();
     super.dispose();
   }

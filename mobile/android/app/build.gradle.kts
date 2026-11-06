@@ -58,3 +58,8 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // FileProvider : installation de l'APK de mise à jour.
+    implementation("androidx.core:core:1.13.1")
+}
