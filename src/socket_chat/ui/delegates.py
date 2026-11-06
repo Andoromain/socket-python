@@ -590,7 +590,13 @@ class ContactDelegate(QStyledItemDelegate):
             rect.left() + 12, rect.center().y() - self.AVATAR / 2, self.AVATAR, self.AVATAR
         )
         paint_avatar(
-            painter, avatar, summary.contact.name, summary.contact.id, online=online, ring=ring
+            painter,
+            avatar,
+            summary.contact.name,
+            summary.contact.id,
+            online=online,
+            ring=ring,
+            photo=summary.contact.avatar,
         )
 
         left = avatar.right() + 12

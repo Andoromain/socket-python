@@ -111,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
 
     settings = Settings()
     store = Store(data_dir / "history.sqlite3")
-    messenger = Messenger(store, settings.user_id, settings.name)
+    messenger = Messenger(store, settings.user_id, settings.name, avatar=settings.avatar)
     messenger.error.connect(lambda text: log.warning("%s", text))
     if not messenger.start(settings.port):
         QMessageBox.critical(
