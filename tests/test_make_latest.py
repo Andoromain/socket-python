@@ -25,12 +25,14 @@ CHANGELOG = """# Journal
 """
 
 
-def write_assets(dist: Path, version: str, *, windows=True, linux=True) -> None:
+def write_assets(dist: Path, version: str, *, windows=True, linux=True, android=False) -> None:
     dist.mkdir(parents=True, exist_ok=True)
     if windows:
         (dist / f"socket-chat-{version}-windows-setup.exe").write_bytes(b"exe" * 100)
     if linux:
         (dist / f"socket-chat-{version}-linux-x86_64.tar.gz").write_bytes(b"tgz" * 50)
+    if android:
+        (dist / f"socket-chat-{version}-android.apk").write_bytes(b"apk" * 70)
 
 
 def test_manifest_lists_assets_and_notes(tmp_path):
@@ -46,6 +48,19 @@ def test_manifest_lists_assets_and_notes(tmp_path):
     assert parsed.assets["linux-x86_64"].url == (
         "https://exemple.fr/maj/socket-chat-9.9.9-linux-x86_64.tar.gz"
     )
+
+
+def test_android_apk_is_listed_and_ignored_by_desktop(tmp_path):
+    write_assets(tmp_path, "9.9.9", android=True)
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_text(CHANGELOG, encoding="utf-8")
+    manifest = make_latest.build_manifest(tmp_path, "9.9.9", changelog)
+    assert manifest["assets"]["android"]["name"] == "socket-chat-9.9.9-android.apk"
+    assert manifest["assets"]["android"]["size"] == 210
+    parsed = parse_manifest(json.dumps(manifest).encode(), "https://exemple.fr/maj/latest.json")
+    # Un poste Windows ou Linux ne choisit jamais l'APK.
+    for key in ("windows-x64", "linux-x86_64"):
+        assert parsed.asset_for(key).name.endswith((".exe", ".tar.gz"))
 
 
 def test_partial_platforms_and_missing_assets(tmp_path):

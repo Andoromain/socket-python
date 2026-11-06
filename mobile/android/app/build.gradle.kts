@@ -26,11 +26,25 @@ android {
         versionName = flutter.versionName
     }
 
+    // Clé de publication : fournie par le workflow Release (secrets ANDROID_*). Android
+    // n'installe une mise à jour que si elle est signée avec la même clé que l'APK installé.
+    // Sans ces variables (CI des PR, poste de développement), l'APK est signé avec la clé
+    // de débogage : il convient pour un essai, pas pour être distribué.
+    val releaseKeystore = System.getenv("ANDROID_KEYSTORE_PATH")?.takeIf { it.isNotBlank() }
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = file(releaseKeystore)
+                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // APK de test signé avec la clé de débogage ; la signature de publication
-            // (clé stable, indispensable aux mises à jour) arrive avec la publication.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName(if (releaseKeystore != null) "release" else "debug")
         }
     }
 }

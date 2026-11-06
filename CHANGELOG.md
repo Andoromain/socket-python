@@ -1,5 +1,21 @@
 # Journal des modifications
 
+## 3.3.1
+
+Compatible avec la 3.3 (même protocole) : rien ne change sur les postes Windows et Linux.
+
+### Ajouté
+- **APK Android publié avec chaque version** (`socket-chat-X.Y.Z-android.apk`, à côté
+  des installeurs Windows et Linux), signé avec la clé définitive de Socket Chat : les
+  versions suivantes s'installeront par-dessus en conservant l'historique. Il figure
+  aussi dans `latest.json`, pour la future mise à jour proposée par l'application.
+- La publication refuse un APK qui ne serait pas signé avec cette clé.
+
+### À savoir
+- Un APK d'essai installé avant la 3.3.1 (artefact de GitHub Actions) doit être
+  désinstallé une fois avant d'installer celui-ci : il était signé avec une clé de
+  test.
+
 ## 3.3.0
 
 Compatible avec la 3.2 (même protocole) : rien ne change sur les postes Windows et Linux.
