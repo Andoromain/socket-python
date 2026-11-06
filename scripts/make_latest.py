@@ -76,7 +76,8 @@ def tag_error(tag: str, version: str) -> str | None:
         f"Le tag {tag} ne correspond pas à la version du code ({version}). "
         f"Publier ce code sous un autre numéro ferait proposer la mise à jour en boucle. "
         f"Pour publier {tag.removeprefix('v')} : changez d'abord la version "
-        "(src/socket_chat/__init__.py, packaging/windows/version_info.txt, CHANGELOG.md), "
+        "(src/socket_chat/__init__.py, packaging/windows/version_info.txt, "
+        "mobile/pubspec.yaml, mobile/lib/version.dart, CHANGELOG.md), "
         f"fusionnez, puis créez le tag. Supprimez ce tag : git push origin --delete {tag}"
     )
 

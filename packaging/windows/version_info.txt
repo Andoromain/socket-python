@@ -1,14 +1,14 @@
 # Métadonnées de l'exécutable Windows (onglet « Détails » des propriétés).
 # Mettre à jour filevers/prodvers et les chaînes lors d'une nouvelle version.
 VSVersionInfo(
-  ffi=FixedFileInfo(filevers=(3, 2, 1, 0), prodvers=(3, 2, 1, 0)),
+  ffi=FixedFileInfo(filevers=(3, 3, 0, 0), prodvers=(3, 3, 0, 0)),
   kids=[
     StringFileInfo([
       StringTable('040C04B0', [
         StringStruct('FileDescription', 'Socket Chat'),
-        StringStruct('FileVersion', '3.2.1'),
+        StringStruct('FileVersion', '3.3.0'),
         StringStruct('ProductName', 'Socket Chat'),
-        StringStruct('ProductVersion', '3.2.1'),
+        StringStruct('ProductVersion', '3.3.0'),
         StringStruct('InternalName', 'socket-chat'),
         StringStruct('OriginalFilename', 'socket-chat.exe'),
       ])
