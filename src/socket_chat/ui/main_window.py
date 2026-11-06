@@ -1,302 +1,350 @@
-"""Fenêtre principale de Socket Chat."""
+"""Fenêtre principale : contacts à gauche, conversation à droite."""
 
 from __future__ import annotations
 
-import html
-from datetime import datetime
-
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QAction, QCloseEvent, QKeyEvent, QKeySequence, QPalette
+from PySide6.QtCore import QEvent, QSortFilterProxyModel, Qt, QTimer, Signal
+from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
+    QListView,
     QMainWindow,
     QMessageBox,
-    QPlainTextEdit,
     QPushButton,
-    QStyle,
-    QTextBrowser,
+    QSplitter,
     QVBoxLayout,
     QWidget,
 )
 
 from .. import __version__
-from ..network import ChatSession, SessionState, local_ipv4_addresses
-from ..protocol import MAX_TEXT_LENGTH
+from ..discovery import Discovery
+from ..messenger import Messenger
+from ..network import local_ipv4_addresses
 from ..settings import Settings
-from .dialogs import ConnectDialog, SettingsDialog
+from ..store import MessageRecord
+from .conversation import ConversationView
+from .delegates import ContactDelegate
+from .dialogs import AddContactDialog, SettingsDialog
+from .models import ContactListModel, Role
 
 APP_TITLE = "Socket Chat"
 
 
-class MessageInput(QPlainTextEdit):
-    """Zone de saisie : Entrée envoie, Maj+Entrée insère un retour à la ligne."""
-
-    submitted = Signal()
-
-    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802 - API Qt
-        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not (
-            event.modifiers() & Qt.KeyboardModifier.ShiftModifier
-        ):
-            self.submitted.emit()
-            return
-        super().keyPressEvent(event)
-
-
 class MainWindow(QMainWindow):
-    def __init__(self, settings: Settings | None = None, parent: QWidget | None = None):
+    #: Nombre total de messages non lus (pour l'icône de notification).
+    unread_changed = Signal(int)
+    #: Message à notifier : identifiant du contact, nom, aperçu.
+    notify = Signal(str, str, str)
+    #: L'utilisateur a choisi « Quitter » (et non simplement fermé la fenêtre).
+    quit_requested = Signal()
+    #: La fenêtre a été masquée dans la zone de notification.
+    hidden_to_tray = Signal()
+
+    def __init__(
+        self,
+        settings: Settings,
+        messenger: Messenger,
+        discovery: Discovery | None = None,
+        parent: QWidget | None = None,
+    ):
         super().__init__(parent)
-        self.settings = settings or Settings()
-        self.session = ChatSession(self.settings.name, self)
+        self.settings = settings
+        self.messenger = messenger
+        self.discovery = discovery
+        #: Fermer la fenêtre la masque (vrai seulement si une zone de notification existe).
+        self.close_to_tray = False
+        self.tray_available = False
+        self._quitting = False
+        self._refreshing = False
+        self._select_new_contact = False
+        self._known_ids: set[str] = set()
+
+        self._refresh_timer = QTimer(self, singleShot=True, interval=0)
+        self._refresh_timer.timeout.connect(self._refresh_contacts)
 
         self._build_ui()
-        self._build_actions()
-        self._connect_session()
-        self._on_state_changed(SessionState.IDLE)
+        self._build_menus()
+        self._connect_messenger()
+        self._refresh_contacts()
 
-        geometry = self.settings.window_geometry
+        geometry = settings.window_geometry
         if geometry is not None:
             self.restoreGeometry(geometry)
         else:
-            self.resize(520, 600)
+            self.resize(940, 640)
+        splitter = settings.splitter_state
+        if splitter is not None:
+            self.splitter.restoreState(splitter)
 
     # -- Construction ----------------------------------------------------
     def _build_ui(self) -> None:
         self.setWindowTitle(APP_TITLE)
 
-        self.transcript = QTextBrowser(self)
-        self.transcript.setOpenExternalLinks(False)
-        self.transcript.setPlaceholderText(
-            "Hébergez une conversation ou rejoignez celle d'un collègue pour commencer."
+        # Panneau des contacts
+        left = QWidget(self)
+        self.search = QLineEdit(left)
+        self.search.setPlaceholderText("Rechercher un collègue…")
+        self.search.setClearButtonEnabled(True)
+
+        self.contacts = ContactListModel(self.messenger, self)
+        self.proxy = QSortFilterProxyModel(self)
+        self.proxy.setSourceModel(self.contacts)
+        self.proxy.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self.search.textChanged.connect(self.proxy.setFilterFixedString)
+
+        self.contact_list = QListView(left)
+        self.contact_list.setModel(self.proxy)
+        self.contact_list.setItemDelegate(ContactDelegate(self.contact_list))
+        self.contact_list.setMouseTracking(True)
+        self.contact_list.setUniformItemSizes(True)
+        self.contact_list.setFrameShape(QListView.Shape.NoFrame)
+        self.contact_list.selectionModel().currentChanged.connect(self._on_current_changed)
+
+        self.empty_contacts = QLabel(
+            "Aucun collègue pour l'instant.\n\nCeux qui ont Socket Chat ouvert sur le "
+            "réseau apparaîtront ici automatiquement.",
+            left,
+        )
+        self.empty_contacts.setWordWrap(True)
+        self.empty_contacts.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_contacts.setForegroundRole(self.empty_contacts.foregroundRole().PlaceholderText)
+        self.empty_contacts.setMargin(16)
+
+        self.add_button = QPushButton("Ajouter par adresse…", left)
+        self.add_button.clicked.connect(self.add_contact)
+        self.me_label = QLabel(left)
+        self.me_label.setWordWrap(True)
+        self.me_label.setForegroundRole(self.me_label.foregroundRole().PlaceholderText)
+        self.me_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+
+        left_layout = QVBoxLayout(left)
+        left_layout.setContentsMargins(10, 10, 10, 10)
+        left_layout.addWidget(self.search)
+        left_layout.addWidget(self.contact_list, 1)
+        left_layout.addWidget(self.empty_contacts, 1)
+        bottom = QHBoxLayout()
+        bottom.addWidget(self.add_button)
+        bottom.addStretch(1)
+        left_layout.addLayout(bottom)
+        left_layout.addWidget(self.me_label)
+
+        # Conversation
+        self.conversation = ConversationView(self.messenger, self.settings, self)
+        self.conversation.message_error.connect(
+            lambda text: QMessageBox.warning(self, APP_TITLE, text)
         )
 
-        self.input = MessageInput(self)
-        self.input.setPlaceholderText("Écrivez un message… (Maj+Entrée pour aller à la ligne)")
-        self.input.setFixedHeight(self.fontMetrics().lineSpacing() * 4)
-        self.input.submitted.connect(self.send_message)
-
-        self.send_button = QPushButton("&Envoyer", self)
-        self.send_button.setDefault(True)
-        self.send_button.clicked.connect(self.send_message)
-
-        input_row = QHBoxLayout()
-        input_row.addWidget(self.input, 1)
-        input_row.addWidget(self.send_button, 0, Qt.AlignmentFlag.AlignBottom)
-
+        self.splitter = QSplitter(self)
+        self.splitter.addWidget(left)
+        self.splitter.addWidget(self.conversation)
+        self.splitter.setStretchFactor(0, 0)
+        self.splitter.setStretchFactor(1, 1)
+        self.splitter.setSizes([300, 640])
+        self.splitter.setChildrenCollapsible(False)
+        left.setMinimumWidth(220)
         central = QWidget(self)
-        layout = QVBoxLayout(central)
-        layout.addWidget(self.transcript, 1)
-        layout.addLayout(input_row)
+        #: Zone des bandeaux (mise à jour disponible…), au-dessus des panneaux.
+        self.banner_area = QVBoxLayout(central)
+        self.banner_area.setContentsMargins(0, 0, 0, 0)
+        self.banner_area.setSpacing(0)
+        self.banner_area.addWidget(self.splitter, 1)
         self.setCentralWidget(central)
+        self._refresh_me()
 
-        self.status_label = QLabel(self)
-        self.statusBar().addWidget(self.status_label, 1)
+    def _build_menus(self) -> None:
+        add_action = QAction("&Ajouter un collègue par adresse…", self)
+        add_action.setShortcut(QKeySequence("Ctrl+N"))
+        add_action.triggered.connect(self.add_contact)
 
-    def _build_actions(self) -> None:
-        style = self.style()
-        self.host_action = QAction(
-            style.standardIcon(QStyle.StandardPixmap.SP_DriveNetIcon), "&Héberger", self
-        )
-        self.host_action.setShortcut(QKeySequence("Ctrl+H"))
-        self.host_action.setStatusTip("Attendre qu'un collègue se connecte à ce poste")
-        self.host_action.triggered.connect(self.host)
-
-        self.join_action = QAction(
-            style.standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton), "&Rejoindre…", self
-        )
-        self.join_action.setShortcut(QKeySequence("Ctrl+J"))
-        self.join_action.setStatusTip("Se connecter au poste d'un collègue")
-        self.join_action.triggered.connect(self.join)
-
-        self.stop_action = QAction(
-            style.standardIcon(QStyle.StandardPixmap.SP_BrowserStop), "&Déconnecter", self
-        )
-        self.stop_action.setShortcut(QKeySequence("Ctrl+D"))
-        self.stop_action.triggered.connect(self.stop)
-
-        self.settings_action = QAction("&Préférences…", self)
-        self.settings_action.setShortcut(QKeySequence.StandardKey.Preferences)
-        self.settings_action.triggered.connect(self.edit_settings)
-
-        self.clear_action = QAction("&Effacer l'historique", self)
-        self.clear_action.triggered.connect(self.transcript.clear)
+        settings_action = QAction("&Préférences…", self)
+        settings_action.setShortcut(QKeySequence("Ctrl+,"))
+        settings_action.triggered.connect(self.edit_settings)
 
         quit_action = QAction("&Quitter", self)
-        quit_action.setShortcut(QKeySequence.StandardKey.Quit)
-        quit_action.triggered.connect(self.close)
+        quit_action.setShortcut(QKeySequence("Ctrl+Q"))
+        quit_action.triggered.connect(self.request_quit)
+
+        search_action = QAction("Rechercher", self)
+        search_action.setShortcut(QKeySequence.StandardKey.Find)
+        search_action.triggered.connect(lambda: self.search.setFocus())
+        self.addAction(search_action)
 
         about_action = QAction("À &propos", self)
         about_action.triggered.connect(self.about)
 
-        menu = self.menuBar().addMenu("&Conversation")
-        menu.addActions([self.host_action, self.join_action, self.stop_action])
-        menu.addSeparator()
-        menu.addAction(self.clear_action)
-        menu.addAction(self.settings_action)
+        menu = self.menuBar().addMenu("&Socket Chat")
+        menu.addAction(add_action)
+        menu.addAction(settings_action)
         menu.addSeparator()
         menu.addAction(quit_action)
-        self.menuBar().addMenu("&Aide").addAction(about_action)
+        self.help_menu = self.menuBar().addMenu("&Aide")
+        self.help_menu.addAction(about_action)
 
-        toolbar = self.addToolBar("Conversation")
-        toolbar.setObjectName("main_toolbar")
-        toolbar.setMovable(False)
-        toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        toolbar.addActions([self.host_action, self.join_action, self.stop_action])
-
-    def _connect_session(self) -> None:
-        self.session.state_changed.connect(self._on_state_changed)
-        self.session.peer_joined.connect(self._on_peer_joined)
-        self.session.peer_left.connect(self._on_peer_left)
-        self.session.message_received.connect(self._on_message_received)
-        self.session.error.connect(self._on_error)
+    def _connect_messenger(self) -> None:
+        m = self.messenger
+        m.contacts_changed.connect(self._refresh_timer.start)
+        m.presence_changed.connect(lambda cid, _on: self.contacts.contact_changed(cid))
+        m.typing_changed.connect(lambda cid, _on: self.contacts.contact_changed(cid))
+        m.message_added.connect(self._on_message_added)
+        m.error.connect(lambda text: QMessageBox.warning(self, APP_TITLE, text))
 
     # -- Actions ---------------------------------------------------------
-    def host(self) -> None:
-        self.session.host(self.settings.port)
-
-    def join(self) -> None:
-        dialog = ConnectDialog(self.settings.recent_hosts, self.settings.port, self)
-        if dialog.exec() != ConnectDialog.DialogCode.Accepted:
+    def add_contact(self) -> None:
+        dialog = AddContactDialog(self.settings.recent_hosts, self.settings.port, self)
+        if dialog.exec() != AddContactDialog.DialogCode.Accepted:
             return
         self.settings.remember_host(dialog.host)
-        self._append_info(f"Connexion à {dialog.host}:{dialog.port}…")
-        self.session.join(dialog.host, dialog.port)
-
-    def stop(self) -> None:
-        self.session.stop()
-
-    def send_message(self) -> None:
-        text = self.input.toPlainText().strip()
-        if not text or self.session.state != SessionState.CONNECTED:
-            return
-        if len(text) > MAX_TEXT_LENGTH:
-            QMessageBox.warning(
-                self,
-                "Message trop long",
-                f"Un message ne peut pas dépasser {MAX_TEXT_LENGTH} caractères.",
-            )
-            return
-        self.session.send(text)
-        self._append_message(self.session.local_name, text, own=True)
-        self.input.clear()
+        self._select_new_contact = True
+        self.statusBar().showMessage(f"Connexion à {dialog.host}:{dialog.port}…", 5000)
+        self.messenger.add_contact(dialog.host, dialog.port)
 
     def edit_settings(self, *, first_run: bool = False) -> bool:
-        dialog = SettingsDialog(self.settings.name, self.settings.port, self, first_run=first_run)
+        dialog = SettingsDialog(
+            self.settings.name,
+            self.settings.port,
+            self,
+            close_to_tray=self.settings.close_to_tray,
+            tray_available=self.tray_available,
+            first_run=first_run,
+        )
         if dialog.exec() != SettingsDialog.DialogCode.Accepted:
             return False
+        port_changed = dialog.port != self.settings.port
         self.settings.name = dialog.name
         self.settings.port = dialog.port
-        self.session.local_name = dialog.name
-        if self.session.state != SessionState.IDLE:
-            self.statusBar().showMessage(
-                "Les changements s'appliqueront à la prochaine conversation.", 5000
+        self.settings.close_to_tray = dialog.close_to_tray
+        self.close_to_tray = self.tray_available and dialog.close_to_tray
+        self.messenger.name = dialog.name
+        if self.discovery is not None:
+            self.discovery.set_name(dialog.name)
+        if port_changed and not first_run:
+            QMessageBox.information(
+                self, APP_TITLE, "Le nouveau port sera utilisé au prochain démarrage."
             )
-        self._refresh_status()
+        self._refresh_me()
         return True
 
+    def open_conversation(self, contact_id: str) -> None:
+        """Affiche la fenêtre sur la conversation demandée (clic sur une notification)."""
+        self.show_and_raise()
+        row = self.contacts.row_of(contact_id)
+        if row is None:
+            return
+        self.search.clear()
+        index = self.proxy.mapFromSource(self.contacts.index(row))
+        self.contact_list.setCurrentIndex(index)
+
+    def add_banner(self, banner: QWidget) -> None:
+        """Ajoute un bandeau en haut de la fenêtre, au-dessus des deux panneaux."""
+        self.banner_area.insertWidget(self.banner_area.count() - 1, banner)
+
+    def show_and_raise(self) -> None:
+        if self.isMinimized():
+            self.showNormal()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def request_quit(self) -> None:
+        self._quitting = True
+        self.quit_requested.emit()
+        self.close()
+
     def about(self) -> None:
+        from PySide6 import QtCore
+
         QMessageBox.about(
             self,
             f"À propos de {APP_TITLE}",
             f"<h3>{APP_TITLE} {__version__}</h3>"
-            "<p>Messagerie instantanée de poste à poste pour le réseau interne.</p>"
-            f"<p>{_qt_version()}</p>",
+            "<p>Messagerie instantanée pour le réseau interne.</p>"
+            f"<p>PySide6 {QtCore.__version__} (Qt {QtCore.qVersion()})</p>",
         )
 
-    # -- Réactions à la session -------------------------------------------
-    def _on_state_changed(self, state: SessionState) -> None:
-        connected = state == SessionState.CONNECTED
-        self.host_action.setEnabled(state == SessionState.IDLE)
-        self.join_action.setEnabled(state == SessionState.IDLE)
-        self.stop_action.setEnabled(state != SessionState.IDLE)
-        self.input.setEnabled(connected)
-        self.send_button.setEnabled(connected)
-        if connected:
-            self.input.setFocus()
-        if state == SessionState.LISTENING and not self.session.peer_name:
-            self._append_info(f"En attente d'un correspondant ({self._listening_text()}).")
-        self._refresh_status()
+    # -- Réactions -------------------------------------------------------
+    def _on_current_changed(self, current, _previous) -> None:
+        if self._refreshing:
+            return
+        contact_id = current.data(Role.ID) if current.isValid() else None
+        self.conversation.set_contact(contact_id)
+        self.mark_current_read()
 
-    def _on_peer_joined(self, name: str) -> None:
-        self._append_info(f"{name} a rejoint la conversation.")
+    def _on_message_added(self, record: MessageRecord) -> None:
+        if record.contact_id == self.conversation.contact_id:
+            self.conversation.add_message(record)
+        if record.outgoing:
+            return
+        if record.contact_id == self.conversation.contact_id and self._is_attended():
+            self.messenger.mark_read(record.contact_id)
+            return
+        contact = self.messenger.store.contact(record.contact_id)
+        name = contact.name if contact else "Nouveau message"
+        preview = record.preview
+        if record.file is not None:
+            preview = f"vous propose {record.file.name}"
+        self.notify.emit(record.contact_id, name, preview)
         QApplication.alert(self)
 
-    def _on_peer_left(self, name: str, reason: str) -> None:
-        text = f"{name} a quitté la conversation."
-        if reason:
-            text = f"{text} ({reason})"
-        self._append_info(text)
+    def _is_attended(self) -> bool:
+        return self.isVisible() and not self.isMinimized() and self.isActiveWindow()
 
-    def _on_message_received(self, name: str, text: str) -> None:
-        self._append_message(name, text, own=False)
-        QApplication.alert(self)
+    def mark_current_read(self) -> None:
+        if self.conversation.contact_id is not None and self._is_attended():
+            self.messenger.mark_read(self.conversation.contact_id)
 
-    def _on_error(self, message: str) -> None:
-        self._append_info(message, error=True)
-        QMessageBox.warning(self, APP_TITLE, message)
+    def _refresh_contacts(self) -> None:
+        current = self.conversation.contact_id
+        self._refreshing = True
+        try:
+            self.contacts.refresh()
+            ids = self.contacts.ids()
+            new_ids = [cid for cid in ids if cid not in self._known_ids]
+            if self._select_new_contact and new_ids and self._known_ids is not None:
+                current = new_ids[0]
+                self._select_new_contact = False
+            self._known_ids = set(ids)
+            if current is not None and (row := self.contacts.row_of(current)) is not None:
+                index = self.proxy.mapFromSource(self.contacts.index(row))
+                self.contact_list.setCurrentIndex(index)
+        finally:
+            self._refreshing = False
+        if current != self.conversation.contact_id:
+            self.conversation.set_contact(current)
+            self.mark_current_read()
+        has_contacts = bool(self.contacts.rowCount())
+        self.contact_list.setVisible(has_contacts)
+        self.empty_contacts.setVisible(not has_contacts)
+        self.update_unread()
 
-    # -- Affichage -------------------------------------------------------
-    def _listening_text(self) -> str:
-        port = self.session.listening_port
-        addresses = local_ipv4_addresses() or ["localhost"]
-        return ", ".join(f"{address}:{port}" for address in addresses)
+    def update_unread(self) -> None:
+        unread = self.messenger.store.total_unread()
+        self.setWindowTitle(f"({unread}) {APP_TITLE}" if unread else APP_TITLE)
+        self.unread_changed.emit(unread)
 
-    def _refresh_status(self) -> None:
-        state = self.session.state
-        name = self.session.local_name
-        if state == SessionState.CONNECTED:
-            text = f"Connecté à {self.session.peer_name}"
-        elif state == SessionState.LISTENING:
-            text = f"En écoute sur {self._listening_text()}"
-        elif state == SessionState.CONNECTING:
-            text = "Connexion en cours…"
-        else:
-            text = "Non connecté"
-        self.status_label.setText(f"{text}  —  vous : {name}")
-        if state == SessionState.CONNECTED:
-            self.setWindowTitle(f"{self.session.peer_name} — {APP_TITLE}")
-        else:
-            self.setWindowTitle(APP_TITLE)
-
-    def _append_message(self, name: str, text: str, *, own: bool) -> None:
-        role = QPalette.ColorRole.Highlight if own else QPalette.ColorRole.Link
-        color = self.palette().color(role).name()
-        body = html.escape(text).replace("\n", "<br>")
-        self.transcript.append(
-            f'<p><span style="color:gray">{_now()}</span> '
-            f'<b style="color:{color}">{html.escape(name)}</b><br>{body}</p>'
-        )
-
-    def _append_info(self, text: str, *, error: bool = False) -> None:
-        color = "#c62828" if error else "gray"
-        self.transcript.append(
-            f'<p style="color:{color}"><i>{_now()} — {html.escape(text)}</i></p>'
-        )
+    def _refresh_me(self) -> None:
+        port = self.messenger.port
+        addresses = ", ".join(local_ipv4_addresses()) or "adresse inconnue"
+        where = f"{addresses} · port {port}" if port else "hors ligne"
+        self.me_label.setText(f"Vous : <b>{self.messenger.name}</b><br>{where}")
 
     # -- Événements ------------------------------------------------------
-    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 - API Qt
-        if self.session.state == SessionState.CONNECTED:
-            answer = QMessageBox.question(
-                self,
-                APP_TITLE,
-                f"Une conversation avec {self.session.peer_name} est en cours.\n"
-                "Quitter quand même ?",
-            )
-            if answer != QMessageBox.StandardButton.Yes:
-                event.ignore()
-                return
-        self.session.stop()
+    def changeEvent(self, event: QEvent) -> None:  # noqa: N802 - API Qt
+        if event.type() in (QEvent.Type.ActivationChange, QEvent.Type.WindowStateChange):
+            QTimer.singleShot(0, self, self.mark_current_read)
+        super().changeEvent(event)
+
+    def _save_layout(self) -> None:
         self.settings.window_geometry = self.saveGeometry()
+        self.settings.splitter_state = self.splitter.saveState()
         self.settings.sync()
+
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 - API Qt
+        self._save_layout()
+        if self.close_to_tray and not self._quitting:
+            event.ignore()
+            self.hide()
+            self.hidden_to_tray.emit()
+            return
         super().closeEvent(event)
-
-
-def _now() -> str:
-    return datetime.now().strftime("%H:%M")
-
-
-def _qt_version() -> str:
-    from PySide6 import QtCore
-
-    return f"PySide6 {QtCore.__version__} (Qt {QtCore.qVersion()})"

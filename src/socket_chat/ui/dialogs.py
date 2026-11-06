@@ -1,8 +1,9 @@
-"""Boîtes de dialogue : préférences et connexion à un correspondant."""
+"""Boîtes de dialogue : préférences et ajout d'un contact par son adresse."""
 
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -26,9 +27,18 @@ def _port_spinbox(value: int, parent: QWidget) -> QSpinBox:
 
 
 class SettingsDialog(QDialog):
-    """Saisie du nom d'affichage et du port par défaut."""
+    """Nom d'affichage, port d'écoute et comportement de la fenêtre."""
 
-    def __init__(self, name: str, port: int, parent: QWidget | None = None, *, first_run=False):
+    def __init__(
+        self,
+        name: str,
+        port: int,
+        parent: QWidget | None = None,
+        *,
+        close_to_tray: bool = True,
+        tray_available: bool = True,
+        first_run: bool = False,
+    ):
         super().__init__(parent)
         self.setWindowTitle("Bienvenue" if first_run else "Préférences")
 
@@ -36,10 +46,17 @@ class SettingsDialog(QDialog):
         self.name_edit.setMaxLength(MAX_NAME_LENGTH)
         self.name_edit.setPlaceholderText("Votre nom")
         self.port_spin = _port_spinbox(port, self)
+        self.port_spin.setToolTip("Port TCP d'écoute. Un changement s'applique au redémarrage.")
+        self.tray_check = QCheckBox(
+            "Garder Socket Chat actif dans la zone de notification à la fermeture", self
+        )
+        self.tray_check.setChecked(close_to_tray and tray_available)
+        self.tray_check.setEnabled(tray_available)
 
         form = QFormLayout()
         form.addRow("&Nom d'affichage :", self.name_edit)
         form.addRow("&Port :", self.port_spin)
+        form.addRow(self.tray_check)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self
@@ -63,6 +80,10 @@ class SettingsDialog(QDialog):
     def port(self) -> int:
         return self.port_spin.value()
 
+    @property
+    def close_to_tray(self) -> bool:
+        return self.tray_check.isChecked()
+
     def accept(self) -> None:
         try:
             validate_name(self.name_edit.text())
@@ -73,12 +94,12 @@ class SettingsDialog(QDialog):
         super().accept()
 
 
-class ConnectDialog(QDialog):
-    """Saisie de l'adresse du correspondant."""
+class AddContactDialog(QDialog):
+    """Ajout d'un collègue par son adresse (autre sous-réseau, VPN…)."""
 
     def __init__(self, recent_hosts: list[str], port: int, parent: QWidget | None = None):
         super().__init__(parent)
-        self.setWindowTitle("Rejoindre une conversation")
+        self.setWindowTitle("Ajouter un collègue")
 
         self.host_combo = QComboBox(self)
         self.host_combo.setEditable(True)
@@ -91,8 +112,8 @@ class ConnectDialog(QDialog):
         form.addRow("&Port :", self.port_spin)
 
         hint = QLabel(
-            "L'adresse est affichée dans la barre d'état de votre correspondant "
-            "lorsqu'il héberge une conversation.",
+            "Inutile pour les collègues du même réseau : ils apparaissent automatiquement. "
+            "Leur adresse est affichée en bas de leur liste de contacts.",
             self,
         )
         hint.setWordWrap(True)
@@ -101,7 +122,7 @@ class ConnectDialog(QDialog):
         self._buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self
         )
-        self._buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Se connecter")
+        self._buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Ajouter")
         self._buttons.accepted.connect(self.accept)
         self._buttons.rejected.connect(self.reject)
         self.host_combo.editTextChanged.connect(self._update_ok)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import logging
 import sys
 from importlib.resources import files
@@ -27,6 +28,11 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--debug", action="store_true", help="journalisation détaillée")
+    parser.add_argument(
+        "--update",
+        action="store_true",
+        help="vérifier tout de suite les mises à jour et installer sans demander",
+    )
     # Les options propres à Qt (-platform, -style…) sont transmises telles quelles.
     args, qt_args = parser.parse_known_args(argv)
     args.qt_args = qt_args
@@ -50,15 +56,29 @@ def setup_logging(log_dir: Path, debug: bool) -> Path:
     return log_file
 
 
+def _instance_name() -> str:
+    try:
+        user = getpass.getuser()
+    except Exception:
+        user = "user"
+    return "socket-chat-" + "".join(c for c in user if c.isalnum())
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
 
     from PySide6.QtCore import QStandardPaths
     from PySide6.QtGui import QIcon
-    from PySide6.QtWidgets import QApplication
+    from PySide6.QtNetwork import QLocalServer, QLocalSocket
+    from PySide6.QtWidgets import QApplication, QMessageBox
 
+    from .discovery import Discovery
+    from .messenger import Messenger
     from .settings import Settings
+    from .store import Store
     from .ui.main_window import MainWindow
+    from .ui.tray import Tray
+    from .ui.updates import UpdateBanner, UpdateController
 
     QApplication.setOrganizationName(ORGANIZATION)
     QApplication.setApplicationName(APPLICATION)
@@ -67,7 +87,22 @@ def main(argv: list[str] | None = None) -> int:
     QApplication.setDesktopFileName("socket-chat")
 
     app = QApplication([sys.argv[0], *args.qt_args])
-    app.setWindowIcon(QIcon(icon_path()))
+    icon = QIcon(icon_path())
+    app.setWindowIcon(icon)
+
+    # Une seule instance par utilisateur : un second lancement réaffiche la première.
+    instance = _instance_name()
+    probe = QLocalSocket()
+    probe.connectToServer(instance)
+    if probe.waitForConnected(500):
+        probe.write(b"show")
+        probe.flush()
+        probe.waitForBytesWritten(500)
+        probe.disconnectFromServer()
+        return 0
+    QLocalServer.removeServer(instance)  # serveur orphelin après un plantage (Unix)
+    local_server = QLocalServer()
+    local_server.listen(instance)
 
     location = QStandardPaths.StandardLocation.AppLocalDataLocation
     data_dir = Path(QStandardPaths.writableLocation(location))
@@ -75,8 +110,80 @@ def main(argv: list[str] | None = None) -> int:
     log.info("Socket Chat %s démarré (journal : %s)", __version__, log_file)
 
     settings = Settings()
-    window = MainWindow(settings)
+    store = Store(data_dir / "history.sqlite3")
+    messenger = Messenger(store, settings.user_id, settings.name)
+    messenger.error.connect(lambda text: log.warning("%s", text))
+    if not messenger.start(settings.port):
+        QMessageBox.critical(
+            None,
+            "Socket Chat",
+            f"Impossible d'utiliser le port {settings.port} : il est déjà occupé par un autre "
+            "programme.\nModifiez le port dans les préférences (ou le fichier de "
+            "configuration) puis relancez Socket Chat.",
+        )
+        store.close()
+        return 1
+
+    discovery = Discovery(settings.user_id, settings.name, messenger.port or settings.port)
+    if discovery.start():
+        messenger.attach_discovery(discovery)
+    else:
+        log.warning("Détection automatique indisponible : ajout par adresse uniquement")
+
+    window = MainWindow(settings, messenger, discovery)
+    banner = UpdateBanner(window)
+    window.add_banner(banner)
+    updates = UpdateController(settings, messenger, banner, window)
+    window.help_menu.insertAction(window.help_menu.actions()[0], updates.menu_action(window))
+    updates.quit_requested.connect(window.request_quit)
+
+    tray = None
+    if Tray.available():
+        tray = Tray(icon)
+        tray.show()
+        window.tray_available = True
+        window.close_to_tray = settings.close_to_tray
+        app.setQuitOnLastWindowClosed(False)
+        window.unread_changed.connect(tray.set_unread)
+        window.notify.connect(tray.notify)
+        tray.open_requested.connect(window.show_and_raise)
+        tray.conversation_requested.connect(window.open_conversation)
+        tray.quit_requested.connect(window.request_quit)
+        window.quit_requested.connect(app.quit)
+
+        def on_hidden() -> None:
+            if not settings.tray_hint_shown:
+                settings.tray_hint_shown = True
+                tray.info(
+                    "Socket Chat reste actif",
+                    "Vous serez prévenu des nouveaux messages. Clic droit sur l'icône "
+                    "pour quitter.",
+                )
+
+        window.hidden_to_tray.connect(on_hidden)
+        updates.notify.connect(tray.info)
+        window.update_unread()  # état initial de l'icône
+
+    local_server.newConnection.connect(
+        lambda: (local_server.nextPendingConnection().deleteLater(), window.show_and_raise())
+    )
+
+    def shutdown() -> None:
+        updates.stop()
+        discovery.stop()
+        messenger.stop()
+        if tray is not None:
+            tray.hide()
+        local_server.close()
+        store.close()
+
+    app.aboutToQuit.connect(shutdown)
+
     window.show()
+    if args.update:
+        updates.auto_install = True
+        updates.checker.check_now()
+    updates.start()
     if not settings.has_name and not window.edit_settings(first_run=True):
         settings.name = settings.name  # mémorise le nom proposé par défaut
 

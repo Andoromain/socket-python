@@ -1,19 +1,48 @@
 name: Release
 
-# Construit l'installeur Windows et l'archive Linux.
+# Construit l'installeur Windows, l'archive Linux et l'APK Android signé, puis le
+# manifeste de mise à jour (latest.json).
+# - Pull request touchant au packaging : construction et vérification seulement.
 # - Lancement manuel : fichiers disponibles dans l'onglet « Artifacts » de l'exécution.
-# - Tag vX.Y.Z : fichiers joints à une Release GitHub.
+# - Tag vX.Y.Z : Release dans ce dépôt (privé) et, si le secret RELEASES_TOKEN existe,
+#   dans le dépôt public RELEASES_REPO consulté par la mise à jour automatique.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+  pull_request:
+    paths:
+      - "packaging/**"
+      - "scripts/**"
+      - ".github/workflows/release.yml"
+      - "src/socket_chat/updater.py"
+      - "mobile/android/**"
 
 permissions:
   contents: write
 
+env:
+  # Dépôt PUBLIC qui ne contient que les installeurs (le code reste privé).
+  RELEASES_REPO: andoajpr2/socket-chat-releases
+
 jobs:
+  check:
+    name: Vérification du tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Échoue en quelques secondes (avant les constructions) si le tag ne désigne pas
+      # la version du code : sinon les postes verraient une mise à jour en boucle.
+      - name: Tag conforme à la version du code
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: python scripts/make_latest.py --check-tag "${{ github.ref_name }}"
+
   build:
     name: Build ${{ matrix.os }}
+    needs: check
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -41,16 +70,162 @@ jobs:
             dist/*.tar.gz
           if-no-files-found: error
 
-  publish:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+  android:
+    name: Build Android (APK signé)
+    needs: check
+    runs-on: ubuntu-latest
+    env:
+      IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
+      ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: "3.47.9"
+          cache: true
+      # Android n'installe une mise à jour que si elle est signée avec la même clé : un APK
+      # publié doit TOUJOURS être signé avec la clé définitive (secrets ANDROID_*).
+      - name: Clé de signature
+        run: |
+          if [ -z "$ANDROID_KEYSTORE" ]; then
+            if [ "$IS_TAG" = "true" ]; then
+              echo "::error title=Clé Android absente::Secret ANDROID_KEYSTORE introuvable : l'APK ne peut pas être publié. Ajoutez les 4 secrets ANDROID_* (README, « Publier une version »), puis « Re-run failed jobs »."
+              exit 1
+            fi
+            echo "::warning title=APK d'essai::Secrets ANDROID_* absents : APK signé avec la clé de débogage (essai seulement)."
+            exit 0
+          fi
+          keystore="$RUNNER_TEMP/release.jks"
+          printf '%s' "$ANDROID_KEYSTORE" | tr -d ' \r\n' | base64 -d > "$keystore"
+          if ! keytool -list -v -keystore "$keystore" -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+              -alias "$ANDROID_KEY_ALIAS" > "$RUNNER_TEMP/key.txt" 2>&1; then
+            echo "::error title=Clé Android illisible::Le secret ANDROID_KEYSTORE, ANDROID_KEYSTORE_PASSWORD ou ANDROID_KEY_ALIAS est incorrect (copie incomplète ?). Recopiez-les depuis le fichier de la clé."
+            exit 1
+          fi
+          grep -m1 "SHA256:" "$RUNNER_TEMP/key.txt"
+          echo "ANDROID_KEYSTORE_PATH=$keystore" >> "$GITHUB_ENV"
+      - name: Version
+        run: |
+          version=$(sed -n 's/^version: *\([0-9.]*\)+.*/\1/p' pubspec.yaml)
+          if [ "$IS_TAG" = "true" ] && [ "v$version" != "${{ github.ref_name }}" ]; then
+            echo "::error title=Version Android incohérente::mobile/pubspec.yaml indique $version, le tag est ${{ github.ref_name }}."
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - run: flutter pub get
+      - run: flutter build apk --release
+      - name: Vérification de la signature
+        run: |
+          apk=build/app/outputs/flutter-apk/app-release.apk
+          apksigner="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner"
+          certs=$("$apksigner" verify --print-certs "$apk")
+          echo "$certs"
+          if echo "$certs" | grep -q "CN=Android Debug" && [ "$IS_TAG" = "true" ]; then
+            echo "::error title=APK mal signé::L'APK est signé avec la clé de débogage : publication refusée."
+            exit 1
+          fi
+          mkdir -p ../dist
+          cp "$apk" "../dist/socket-chat-$VERSION-android.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: socket-chat-Android
+          path: dist/*.apk
+          if-no-files-found: error
+
+  manifest:
+    name: Manifeste de mise à jour
+    needs: [build, android]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - uses: actions/download-artifact@v4
         with:
           path: dist
+          pattern: socket-chat-*
           merge-multiple: true
-      - uses: softprops/action-gh-release@v2
+      - name: latest.json
+        env:
+          TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
+        run: |
+          python scripts/make_latest.py --dist dist ${TAG:+--tag "$TAG"}
+          cat dist/latest.json
+          python -c "import json; print(json.load(open('dist/latest.json', encoding='utf-8'))['notes'])" > notes.md
+      - uses: actions/upload-artifact@v4
         with:
-          files: dist/*
-          generate_release_notes: true
+          name: release-files
+          path: |
+            dist/*
+            notes.md
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: manifest
+    runs-on: ubuntu-latest
+    env:
+      RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-files
+          path: release
+      - name: Release (dépôt privé)
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/dist/*
+          body_path: release/notes.md
+      - name: Préparation du dépôt public
+        if: env.RELEASES_TOKEN != ''
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # GitHub refuse de finaliser une Release dans un dépôt sans aucun commit.
+          if out=$(gh api "repos/$RELEASES_REPO/commits?per_page=1" 2>&1); then
+            echo "Dépôt $RELEASES_REPO prêt."
+          elif echo "$out" | grep -qi "empty"; then
+            echo "Dépôt $RELEASES_REPO vide : création d'un premier README."
+            content=$(printf '%s\n' "# Socket Chat : installeurs" "" \
+              "Versions publiées de Socket Chat, lues par la mise à jour automatique." | base64 -w0)
+            gh api -X PUT "repos/$RELEASES_REPO/contents/README.md" \
+              -f message="Initialisation du dépôt des installeurs" -f content="$content" >/dev/null
+          else
+            echo "::error title=Dépôt public inaccessible::$RELEASES_REPO : $out (vérifiez le dépôt et le jeton RELEASES_TOKEN)"
+            exit 1
+          fi
+          # Brouillon laissé par une publication interrompue : supprimé pour éviter un doublon.
+          for id in $(gh api "repos/$RELEASES_REPO/releases?per_page=100" \
+              --jq ".[] | select(.draft and .tag_name == \"$TAG\") | .id"); do
+            echo "Suppression du brouillon $id ($TAG) laissé par une publication précédente."
+            gh api -X DELETE "repos/$RELEASES_REPO/releases/$id"
+          done
+      - name: Release publique (mise à jour automatique)
+        if: env.RELEASES_TOKEN != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          repository: ${{ env.RELEASES_REPO }}
+          token: ${{ secrets.RELEASES_TOKEN }}
+          tag_name: ${{ github.ref_name }}
+          name: Socket Chat ${{ github.ref_name }}
+          body_path: release/notes.md
+          files: release/dist/*
+          make_latest: true
+      - name: Publication publique désactivée
+        if: env.RELEASES_TOKEN == ''
+        run: >-
+          echo "::warning::Secret RELEASES_TOKEN absent : la version n'est pas publiée dans
+          ${{ env.RELEASES_REPO }}, les postes ne verront pas la mise à jour automatique
+          (voir README, « Mise à jour automatique »)."
