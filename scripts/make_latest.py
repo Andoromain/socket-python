@@ -24,6 +24,8 @@ ROOT = Path(__file__).resolve().parents[1]
 ASSETS = {
     "windows-x64": "socket-chat-{version}-windows-setup.exe",
     "linux-x86_64": "socket-chat-{version}-linux-x86_64.tar.gz",
+    # Application Android (APK signé) : ignorée par la version PC, lue par l'application.
+    "android": "socket-chat-{version}-android.apk",
 }
 
 

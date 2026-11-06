@@ -84,22 +84,24 @@ ou, sans pipx, `pip install --user <url ou chemin du dépôt>`. Cela fournit la 
 L'application Android parle le même protocole que les postes : pas de serveur, le
 téléphone doit simplement être sur **le même réseau** (le Wi-Fi de l'entreprise).
 
-1. Dans l'onglet **Actions** du dépôt, ouvrir la dernière exécution réussie de **CI**
-   et télécharger l'artefact **socket-chat-android-test** (fichier zip contenant
-   `socket-chat-X.Y.Z-android-test.apk`).
-2. Copier l'APK sur le téléphone et l'ouvrir. Android demande d'autoriser
-   l'installation depuis cette source (gestionnaire de fichiers ou navigateur) :
-   c'est normal pour une application hors Play Store.
+1. Sur le téléphone, ouvrir la page **Releases** (dépôt public des installeurs, ou ce
+   dépôt) et télécharger `socket-chat-X.Y.Z-android.apk` de la dernière version.
+2. L'ouvrir. Android demande d'autoriser l'installation depuis cette source
+   (navigateur ou gestionnaire de fichiers) : c'est normal pour une application hors
+   Play Store.
 3. Au premier lancement, saisir son nom : les collègues du réseau apparaissent.
+
+Pour mettre à jour, installer l'APK de la nouvelle version par-dessus : l'historique
+est conservé. **Si vous aviez installé un APK d'essai** (artefact
+`socket-chat-android-test` de GitHub Actions, avant la 3.3.1), désinstallez-le une
+fois : il était signé avec une autre clé et Android refuse de le remplacer.
 
 Déjà disponible : détection des collègues, ajout par adresse, conversations, coches,
 « écrit… », emojis et réactions (appui long sur une bulle), messages hors ligne remis
 plus tard. Une offre de fichier venant d'un PC s'affiche et peut être refusée.
 
 Pas encore (version suivante) : réception et envoi de fichiers et de photos,
-notifications quand l'application est fermée, mise à jour intégrée, APK signé avec la
-clé définitive. **Cette version de test devra être désinstallée** avant d'installer la
-version publiée (la clé de signature changera) ; l'historique du téléphone sera perdu.
+notifications quand l'application est fermée, mise à jour proposée par l'application.
 
 Limites à connaître :
 
@@ -372,6 +374,13 @@ L'ordre compte : **le numéro de version change dans le code avant le tag**.
    (`version` de `mobile/pubspec.yaml`, par exemple `3.3.1+30301`, et
    `mobile/lib/version.dart`) et `CHANGELOG.md` (la section de la version sert de notes
    de mise à jour affichées dans l'application). Les tests signalent tout oubli.
+   L'APK Android est signé avec la clé de publication, fournie au workflow par 4 secrets
+   Actions : `ANDROID_KEYSTORE` (fichier de la clé en base64),
+   `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`. Sans eux,
+   la publication s'arrête (un APK signé autrement ne pourrait pas mettre à jour les
+   téléphones). **Conservez la clé en lieu sûr** : GitHub ne permet pas de relire un
+   secret, et sans elle plus aucune mise à jour Android n'est possible sans
+   désinstaller.
 2. Fusionner la PR.
 3. Créer et pousser le tag correspondant, depuis `main` à jour :
    ```bash
@@ -379,8 +388,9 @@ L'ordre compte : **le numéro de version change dans le code avant le tag**.
    git push origin vX.Y.Z
    ```
    Le workflow **Release** vérifie d'abord que le tag correspond à la version du code
-   (sinon il s'arrête aussitôt avec la marche à suivre), construit l'installeur Windows
-   et l'archive Linux, puis les publie dans ce dépôt et dans le dépôt public.
+   (sinon il s'arrête aussitôt avec la marche à suivre), construit l'installeur Windows,
+   l'archive Linux et l'APK Android signé, puis les publie dans ce dépôt et dans le dépôt
+   public.
 
 Si la publication échoue (dépôt public, jeton…), **ne créez pas de nouveau tag** :
 corrigez la cause puis, dans **Actions**, ouvrez l'exécution du tag et cliquez sur
