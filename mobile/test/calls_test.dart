@@ -1,45 +1,11 @@
 // Transposition de tests/test_calls.py : signalisation entre deux appareils, média simulé.
 
-import 'dart:async';
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:socket_chat_mobile/net/calls.dart';
 import 'package:socket_chat_mobile/net/messenger.dart';
 import 'package:socket_chat_mobile/store/store.dart';
 
 import 'helpers.dart';
-
-/// Connecté dès que l'offre et la réponse sont passées.
-class FakeEngine extends MediaEngine {
-  static final instances = <FakeEngine>[];
-  FakeEngine() {
-    instances.add(this);
-  }
-  final remoteIce = <(String, String, int)>[];
-  bool muted = false;
-  bool stopped = false;
-
-  @override
-  Future<void> start({required bool caller, required String media}) async {
-    if (caller) Timer.run(() => localDescription.emit(('offer', 'v=0 offre')));
-    Timer.run(() => localIce.emit(('candidate:1 1 udp 1 10.0.0.1 1 typ host', '0', 0)));
-  }
-
-  @override
-  Future<void> setRemoteDescription(String kind, String sdp) async {
-    if (kind == 'offer') Timer.run(() => localDescription.emit(('answer', 'v=0 réponse')));
-    Timer(const Duration(milliseconds: 10), () => connected.emit(null));
-  }
-
-  @override
-  Future<void> addRemoteIce(String candidate, String mid, int index) async => remoteIce.add((candidate, mid, index));
-
-  @override
-  void setMuted(bool value) => muted = value;
-
-  @override
-  Future<void> stop() async => stopped = true;
-}
 
 void main() {
   late Messengers messengers;

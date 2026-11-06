@@ -223,6 +223,12 @@ class MessageRecord {
     return text.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).join(' ');
   }
 
+  /// Texte affiché dans la bulle (libellé de l'appel pour un appel noté).
+  String get displayText {
+    final c = call;
+    return c == null ? text : '📞 ${c.label(outgoing)}';
+  }
+
   String reactionOf(String author) {
     for (final (who, emoji) in reactions) {
       if (who == author) return emoji;

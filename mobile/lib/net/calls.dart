@@ -49,6 +49,9 @@ abstract class MediaEngine {
   Future<void> setRemoteDescription(String kind, String sdp);
   Future<void> addRemoteIce(String candidate, String mid, int index);
   void setMuted(bool muted);
+
+  /// Haut-parleur (sinon écouteur) ; sans effet hors téléphone.
+  void setSpeaker(bool on) {}
   Future<void> stop();
 }
 
@@ -145,6 +148,14 @@ class CallManager {
     stateChanged.emit(current);
   }
 
+  void setSpeaker(bool on) {
+    final current = call;
+    if (current == null) return;
+    current.speaker = on;
+    current.engine?.setSpeaker(on);
+    stateChanged.emit(current);
+  }
+
   /// Arrêt de l'application : raccroche proprement.
   void stop() => hangup();
 
@@ -224,6 +235,7 @@ class CallManager {
     engine.failed.connect((reason) => _onMediaFailed(callId, reason));
     engine.start(caller: caller, media: current.media).catchError((Object e) => _onMediaFailed(callId, '$e'));
     if (current.muted) engine.setMuted(true);
+    if (current.speaker) engine.setSpeaker(true);
   }
 
   void _sendIfCurrent(String callId, String contactId, Message message) {
