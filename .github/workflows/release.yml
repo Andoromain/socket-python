@@ -124,19 +124,41 @@ jobs:
           fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
       - run: flutter pub get
-      - run: flutter build apk --release
+      # APK universel (tous les téléphones : installation à la main, versions ≤ 3.8), puis un
+      # APK par type de processeur, trois fois plus léger, choisi par la mise à jour intégrée.
+      - name: APK universel
+        run: |
+          flutter build apk --release
+          mkdir -p ../dist
+          cp build/app/outputs/flutter-apk/app-release.apk "../dist/socket-chat-$VERSION-android.apk"
+      - name: APK par type de processeur
+        run: |
+          # Même versionCode que l'APK universel (sans le décalage par processeur que Flutter
+          # ajoute d'ordinaire) : on peut passer de l'un à l'autre dans les deux sens.
+          flutter build apk --release --split-per-abi -P force-version-code-ignoring-abi=true
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            cp "build/app/outputs/flutter-apk/app-$abi-release.apk" "../dist/socket-chat-$VERSION-android-$abi.apk"
+          done
       - name: Vérification de la signature
         run: |
-          apk=build/app/outputs/flutter-apk/app-release.apk
-          apksigner="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner"
-          certs=$("$apksigner" verify --print-certs "$apk")
-          echo "$certs"
-          if echo "$certs" | grep -q "CN=Android Debug" && [ "$IS_TAG" = "true" ]; then
-            echo "::error title=APK mal signé::L'APK est signé avec la clé de débogage : publication refusée."
-            exit 1
-          fi
-          mkdir -p ../dist
-          cp "$apk" "../dist/socket-chat-$VERSION-android.apk"
+          tools="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)"
+          apksigner="${tools}apksigner"
+          for apk in ../dist/*.apk; do
+            # Même versionCode partout : sinon Android refuserait de passer d'un APK à l'autre.
+            code=$("${tools}aapt2" dump badging "$apk" | grep -o "versionCode='[0-9]*'")
+            if [ -n "${expected:-}" ] && [ "$code" != "$expected" ]; then
+              echo "::error title=versionCode incohérent::$apk a $code au lieu de $expected."
+              exit 1
+            fi
+            expected=$code
+            certs=$("$apksigner" verify --print-certs "$apk")
+            echo "$apk"; echo "$certs"
+            if echo "$certs" | grep -q "CN=Android Debug" && [ "$IS_TAG" = "true" ]; then
+              echo "::error title=APK mal signé::$apk est signé avec la clé de débogage : publication refusée."
+              exit 1
+            fi
+          done
+          ls -la ../dist
       - uses: actions/upload-artifact@v4
         with:
           name: socket-chat-Android

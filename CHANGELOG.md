@@ -1,5 +1,20 @@
 # Journal des modifications
 
+## 3.8.1
+
+Compatible avec la 3.8 (même protocole) : rien ne change sur les postes Windows et Linux.
+
+### Amélioré
+- **Mise à jour Android trois fois plus légère** : chaque version est aussi publiée en
+  un APK par type de processeur (`android-arm64-v8a`, `android-armeabi-v7a`,
+  `android-x86_64`). À partir de la 3.8.1, la mise à jour intégrée télécharge celui du
+  téléphone au lieu de l'APK universel.
+
+### À savoir
+- La mise à jour vers la 3.8.1 elle-même passe encore par l'APK universel (les versions
+  précédentes ne connaissent que lui) ; les suivantes seront légères.
+- L'APK universel reste publié pour l'installation à la main sur n'importe quel téléphone.
+
 ## 3.8.0
 
 Compatible avec la 3.6 et la 3.7 (même protocole). Un correspondant encore en 3.6 ou

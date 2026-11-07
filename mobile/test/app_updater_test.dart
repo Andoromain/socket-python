@@ -13,16 +13,17 @@ import 'package:socket_chat_mobile/updates/app_updater.dart';
 import 'package:socket_chat_mobile/updates/installer.dart';
 import 'package:socket_chat_mobile/updates/updater.dart';
 
-Manifest manifest(String version, {bool android = true, String notes = '### Ajouté\n- **Mise à jour** intégrée.'}) =>
-    Manifest(version, '2026-11-06', notes, {
-      if (android)
-        'android': Asset(
-          'socket-chat-$version-android.apk',
-          3,
-          'a' * 64,
-          Uri.parse('https://exemple.fr/socket-chat-$version-android.apk'),
-        ),
-    });
+Asset apkAsset(String name) => Asset(name, 3, 'a' * 64, Uri.parse('https://exemple.fr/$name'));
+
+Manifest manifest(
+  String version, {
+  bool android = true,
+  List<String> abis = const [],
+  String notes = '### Ajouté\n- **Mise à jour** intégrée.',
+}) => Manifest(version, '2026-11-06', notes, {
+  if (android) 'android': apkAsset('socket-chat-$version-android.apk'),
+  for (final abi in abis) 'android-$abi': apkAsset('socket-chat-$version-android-$abi.apk'),
+});
 
 /// Serveur de mise à jour simulé.
 class FakeClient extends UpdateClient {
@@ -50,6 +51,8 @@ class FakeClient extends UpdateClient {
 }
 
 class FakeInstaller implements ApkInstaller {
+  FakeInstaller({this.abis = const []});
+  final List<String> abis;
   bool allowed = true;
   final installed = <String>[];
   int settingsOpened = 0;
@@ -62,6 +65,9 @@ class FakeInstaller implements ApkInstaller {
     installed.add(path);
     return true;
   }
+
+  @override
+  Future<List<String>> supportedAbis() async => abis;
 }
 
 void main() {
@@ -129,6 +135,28 @@ void main() {
     expect(installer.installed.single, endsWith('/updates/socket-chat-3.6.0-android.apk'));
     expect(updater.progress, isNull);
     expect(updater.error, isNull);
+  });
+
+  test('APK du processeur du téléphone, plus léger ; sinon l\'universel', () async {
+    final client = FakeClient(() => manifest('3.8.1', abis: ['arm64-v8a', 'armeabi-v7a', 'x86_64']));
+    // Téléphone 64 bits : arm64-v8a d'abord (ordre de préférence d'Android).
+    final phone = FakeInstaller(abis: ['arm64-v8a', 'armeabi-v7a', 'armeabi']);
+    final updater = makeUpdater(client, phone);
+    await updater.check();
+    await updater.install();
+    expect(phone.installed.single, endsWith('/socket-chat-3.8.1-android-arm64-v8a.apk'));
+
+    // Processeur non publié séparément : APK universel.
+    final other = FakeInstaller(abis: ['mips']);
+    final fallback = makeUpdater(client, other);
+    await fallback.check();
+    await fallback.install();
+    expect(other.installed.single, endsWith('/socket-chat-3.8.1-android.apk'));
+
+    // Manifeste d'avant la 3.8.1 (APK universel seul).
+    final legacy = makeUpdater(FakeClient(() => manifest('3.8.1')), FakeInstaller(abis: ['arm64-v8a']));
+    await legacy.check();
+    expect(legacy.apkFor(legacy.available!)!.name, 'socket-chat-3.8.1-android.apk');
   });
 
   test('autorisation manquante : réglages ouverts, puis installation sans retélécharger', () async {

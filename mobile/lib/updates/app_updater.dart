@@ -45,6 +45,9 @@ class AppUpdater extends ChangeNotifier {
 
   bool checking = false;
   File? _downloaded;
+
+  /// Types de processeur du téléphone (lus une fois) : choix de l'APK le plus léger.
+  List<String>? _abis;
   DateTime? _lastCheck;
 
   bool get busy => checking || progress != null;
@@ -64,7 +67,8 @@ class AppUpdater extends ChangeNotifier {
     notifyListeners();
     try {
       final manifest = await client.fetchManifest(manifestUrl);
-      final apk = manifest.android;
+      _abis ??= await installer.supportedAbis();
+      final apk = apkFor(manifest);
       if (apk != null && isNewer(manifest.version, currentVersion)) {
         if (available?.version != manifest.version) {
           available = manifest;
@@ -84,6 +88,9 @@ class AppUpdater extends ChangeNotifier {
     return showBanner;
   }
 
+  /// L'APK à télécharger pour ce téléphone (celui de son processeur, sinon l'universel).
+  Asset? apkFor(Manifest manifest) => manifest.androidFor(_abis ?? const []);
+
   void dismiss() {
     dismissed = true;
     notifyListeners();
@@ -92,7 +99,7 @@ class AppUpdater extends ChangeNotifier {
   /// Télécharge (si besoin) et vérifie l'APK, puis ouvre l'installateur d'Android.
   Future<void> install() async {
     final manifest = available;
-    final apk = manifest?.android;
+    final apk = manifest == null ? null : apkFor(manifest);
     if (apk == null || busy) return;
     error = null;
     try {

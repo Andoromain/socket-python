@@ -55,6 +55,8 @@ void main() {
       'https://github.com/andoajpr2/socket-chat-releases/releases/download/v9.8.7/socket-chat-9.8.7-android.apk',
     );
     expect(manifest.assets.keys, containsAll(['windows-x64', 'linux-x86_64', 'android']));
+    // Pas d'APK par processeur dans ce manifeste : l'universel convient à tous.
+    expect(manifest.androidFor(['arm64-v8a'])!.name, 'socket-chat-9.8.7-android.apk');
   });
 
   test('manifestes refusés', () {
