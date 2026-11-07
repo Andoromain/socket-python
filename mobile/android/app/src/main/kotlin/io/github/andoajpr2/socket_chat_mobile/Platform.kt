@@ -65,6 +65,8 @@ class Platform(private val app: Context, engine: FlutterEngine) {
         MethodChannel(messenger, "socket_chat/update").setMethodCallHandler { call, result ->
             when (call.method) {
                 "canInstall" -> result.success(canInstallPackages())
+                // Types de processeur, par ordre de préférence : choix de l'APK le plus léger.
+                "supportedAbis" -> result.success(Build.SUPPORTED_ABIS.toList())
                 "openInstallSettings" -> result.done { openInstallSettings() }
                 "installApk" -> {
                     val path = call.argument<String>("path")

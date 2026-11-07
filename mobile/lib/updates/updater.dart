@@ -16,8 +16,12 @@ import '../protocol/protocol.dart';
 const String releasesRepo = 'andoajpr2/socket-chat-releases';
 const String defaultUpdateUrl = 'https://github.com/$releasesRepo/releases/latest/download/latest.json';
 
-/// Entrée du manifeste qui désigne l'APK.
+/// Entrée du manifeste qui désigne l'APK universel (tous les téléphones).
 const String androidAssetKey = 'android';
+
+/// Entrée de l'APK propre à un type de processeur (« android-arm64-v8a »…), trois fois
+/// plus léger que l'universel.
+String androidAbiAssetKey(String abi) => '$androidAssetKey-$abi';
 
 /// Taille maximale du manifeste et d'un fichier publié (octets).
 const int maxManifestSize = 256 * 1024;
@@ -67,8 +71,18 @@ class Manifest {
   final String notes;
   final Map<String, Asset> assets;
 
-  /// L'APK de cette version, s'il est publié.
+  /// L'APK universel de cette version, s'il est publié.
   Asset? get android => assets[androidAssetKey];
+
+  /// L'APK le plus léger qui convient au téléphone : celui du premier type de processeur
+  /// de [abis] (ordre de préférence d'Android) qui est publié, sinon l'universel.
+  Asset? androidFor(List<String> abis) {
+    for (final abi in abis) {
+      final asset = assets[androidAbiAssetKey(abi)];
+      if (asset != null) return asset;
+    }
+    return android;
+  }
 }
 
 /// Adresse à laquelle chercher les fichiers d'une version.

@@ -100,7 +100,14 @@ L'application Android parle le même protocole que les postes : pas de serveur, 
 téléphone doit simplement être sur **le même réseau** (le Wi-Fi de l'entreprise).
 
 1. Sur le téléphone, ouvrir la page **Releases** (dépôt public des installeurs, ou ce
-   dépôt) et télécharger `socket-chat-X.Y.Z-android.apk` de la dernière version.
+   dépôt) et télécharger, pour la dernière version :
+   - `socket-chat-X.Y.Z-android-arm64-v8a.apk` : presque tous les téléphones récents
+     (environ trois fois plus léger) ;
+   - ou `socket-chat-X.Y.Z-android.apk` : tous les téléphones, en cas de doute ou si le
+     premier refuse de s'installer (« application incompatible »).
+
+   Ensuite, la mise à jour intégrée choisit d'elle-même le fichier le plus léger qui
+   convient au téléphone.
 2. L'ouvrir. Android demande d'autoriser l'installation depuis cette source
    (navigateur ou gestionnaire de fichiers) : c'est normal pour une application hors
    Play Store.
