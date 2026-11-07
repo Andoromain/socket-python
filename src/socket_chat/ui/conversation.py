@@ -253,6 +253,7 @@ class ConversationView(QWidget):
 
     message_error = Signal(str)
     call_requested = Signal(str)  # contact à appeler
+    video_call_requested = Signal(str)  # contact à appeler en vidéo
 
     def __init__(
         self, messenger: Messenger, settings: Settings | None = None, parent: QWidget | None = None
@@ -343,6 +344,15 @@ class ConversationView(QWidget):
             lambda: self.contact_id and self.call_requested.emit(self.contact_id)
         )
         header_layout.addWidget(self.call_button)
+        self.video_button = QToolButton(header)
+        self.video_button.setText("🎥")
+        self.video_button.setAutoRaise(True)
+        self.video_button.setToolTip("Appel vidéo")
+        self.video_button.setVisible(False)  # affiché si les appels sont disponibles
+        self.video_button.clicked.connect(
+            lambda: self.contact_id and self.video_call_requested.emit(self.contact_id)
+        )
+        header_layout.addWidget(self.video_button)
 
         separator = QFrame(page)
         separator.setFrameShape(QFrame.Shape.HLine)
@@ -621,7 +631,10 @@ class ConversationView(QWidget):
         self.status_label.setText(status)
         online = self._messenger.is_connected(contact.id) or self._messenger.is_online(contact.id)
         self.call_button.setEnabled(online)
-        self.call_button.setToolTip("Appel audio" if online else "Appel audio : contact hors ligne")
+        offline = "" if online else " : contact hors ligne"
+        self.call_button.setToolTip("Appel audio" + offline)
+        self.video_button.setEnabled(online)
+        self.video_button.setToolTip("Appel vidéo" + offline)
 
     def changeEvent(self, event: QEvent) -> None:  # noqa: N802 - API Qt
         if event.type() == QEvent.Type.PaletteChange and hasattr(self, "list"):

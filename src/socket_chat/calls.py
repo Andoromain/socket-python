@@ -69,6 +69,9 @@ class MediaEngine(QObject):
     def set_muted(self, muted: bool) -> None:
         raise NotImplementedError
 
+    def set_camera_enabled(self, on: bool) -> None:
+        """Appel vidéo : coupe ou rétablit la caméra (image noire chez le correspondant)."""
+
     def stop(self) -> None:
         raise NotImplementedError
 
@@ -82,7 +85,12 @@ class Call:
     state: CallState
     started: float | None = None  # début de la conversation (time.monotonic)
     muted: bool = False
+    camera_off: bool = False  # appel vidéo : caméra coupée
     engine: MediaEngine | None = field(default=None, repr=False)
+
+    @property
+    def video(self) -> bool:
+        return self.media == "video"
 
     @property
     def duration(self) -> int:
@@ -165,6 +173,15 @@ class CallManager(QObject):
         call.muted = muted
         if call.engine is not None:
             call.engine.set_muted(muted)
+        self.state_changed.emit(call)
+
+    def set_camera_enabled(self, on: bool) -> None:
+        call = self.call
+        if call is None or not call.video:
+            return
+        call.camera_off = not on
+        if call.engine is not None:
+            call.engine.set_camera_enabled(on)
         self.state_changed.emit(call)
 
     def stop(self) -> None:
@@ -253,6 +270,8 @@ class CallManager(QObject):
         engine.start(caller, call.media)
         if call.muted:
             engine.set_muted(True)
+        if call.camera_off:
+            engine.set_camera_enabled(False)
 
     def _send_if_current(self, call_id: str, contact_id: str, message: Message) -> None:
         if self.call is not None and self.call.id == call_id:

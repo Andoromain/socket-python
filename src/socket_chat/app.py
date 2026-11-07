@@ -182,6 +182,7 @@ def main(argv: list[str] | None = None) -> int:
 
     calls = None
     ring = None
+    video_view = None
     try:
         from .call_engine import CallHost, WebEngineCallEngine
         from .calls import CallManager
@@ -189,10 +190,13 @@ def main(argv: list[str] | None = None) -> int:
         call_host = CallHost(messenger)
         calls = CallManager(messenger, lambda: WebEngineCallEngine(call_host), messenger)
         ring = call_host.ring
+        video_view = call_host.create_view
     except ImportError as exc:  # installation sans Qt WebEngine : pas d'appels
         log.warning("Appels indisponibles : %s", exc)
 
-    window = MainWindow(settings, messenger, discovery, calls=calls, ring=ring)
+    window = MainWindow(
+        settings, messenger, discovery, calls=calls, ring=ring, video_view=video_view
+    )
     banner = UpdateBanner(window)
     window.add_banner(banner)
     updates = UpdateController(settings, messenger, banner, window)

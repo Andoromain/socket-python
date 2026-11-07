@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QUrl, Signal, Slot
+from PySide6.QtCore import QObject, Qt, QUrl, Signal, Slot
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineCore import (
     QWebEnginePage,
@@ -22,6 +22,8 @@ from PySide6.QtWebEngineCore import (
     QWebEngineProfile,
     QWebEngineSettings,
 )
+from PySide6.QtWebEngineWidgets import QWebEngineView
+from PySide6.QtWidgets import QWidget
 
 from .calls import MediaEngine
 
@@ -45,6 +47,7 @@ class _Bridge(QObject):
     remoteDescriptionReceived = Signal(str, str)  # noqa: N815
     remoteIceReceived = Signal(str, str, int)  # noqa: N815
     muteRequested = Signal(bool)  # noqa: N815
+    cameraRequested = Signal(bool)  # noqa: N815
     stopRequested = Signal()  # noqa: N815
     ringRequested = Signal(bool)  # noqa: N815
     statsRequested = Signal()  # noqa: N815
@@ -54,7 +57,7 @@ class _Bridge(QObject):
     local_ice = Signal(str, str, int)
     media_connected = Signal()
     media_failed = Signal(str)
-    inbound_bytes = Signal(int)
+    inbound_bytes = Signal(int, int)  # octets reçus : son, image
 
     @Slot()
     def ready(self) -> None:
@@ -76,9 +79,9 @@ class _Bridge(QObject):
     def failed(self, message: str) -> None:
         self.media_failed.emit(message)
 
-    @Slot(int)
-    def stats(self, received: int) -> None:
-        self.inbound_bytes.emit(received)
+    @Slot(int, int)
+    def stats(self, audio: int, video: int) -> None:
+        self.inbound_bytes.emit(audio, video)
 
 
 class CallHost(QObject):
@@ -112,6 +115,14 @@ class CallHost(QObject):
         page.setWebChannel(channel)
         page.setHtml(PAGE.read_text(encoding="utf-8"), PAGE_URL)
         self._page = page
+
+    def create_view(self, parent: QWidget | None = None) -> QWebEngineView:
+        """Vue de la page (image des appels vidéo), pour la fenêtre d'appel."""
+        self.ensure_page()
+        view = QWebEngineView(parent)
+        view.setPage(self._page)
+        view.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
+        return view
 
     def send(self, signal_name: str, *args: object) -> None:
         """Transmet une commande à la page (mise en attente tant qu'elle se charge)."""
@@ -169,6 +180,9 @@ class WebEngineCallEngine(MediaEngine):
 
     def set_muted(self, muted: bool) -> None:
         self._host.send("muteRequested", muted)
+
+    def set_camera_enabled(self, on: bool) -> None:
+        self._host.send("cameraRequested", on)
 
     def stop(self) -> None:
         if not self._active:

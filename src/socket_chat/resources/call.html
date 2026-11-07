@@ -3,12 +3,25 @@
 <head>
 <meta charset="utf-8">
 <title>Socket Chat — média des appels</title>
-<!-- Page invisible : WebRTC (micro, audio du correspondant) et sonnerie, pilotés par
-     Python via QWebChannel (src/socket_chat/call_engine.py). Aucun accès réseau hormis
-     la liaison directe avec le correspondant (pas de serveur STUN/TURN). -->
+<!-- WebRTC (micro, caméra, son et image du correspondant) et sonnerie, pilotés par
+     Python via QWebChannel (src/socket_chat/call_engine.py). Invisible pour un appel
+     audio ; affichée dans la fenêtre d'appel pour un appel vidéo. Aucun accès réseau
+     hormis la liaison directe avec le correspondant (pas de serveur STUN/TURN). -->
+<style>
+  html, body { margin: 0; height: 100%; background: #111; overflow: hidden; }
+  #remote { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  #local {
+    position: absolute; right: 12px; bottom: 12px; width: 26%; max-width: 240px;
+    border-radius: 8px; box-shadow: 0 2px 8px rgba(0, 0, 0, .6);
+    transform: scaleX(-1);           /* effet miroir, comme dans une glace */
+  }
+  body:not(.video) video { visibility: hidden; }
+  body.camera-off #local { visibility: hidden; }
+</style>
 </head>
 <body>
-<audio id="remote" autoplay></audio>
+<video id="remote" autoplay playsinline></video>
+<video id="local" autoplay playsinline muted></video>
 <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
 <script>
 "use strict";
@@ -31,6 +44,8 @@ function reset() {
   pc = null; stream = null; remoteSet = false; pendingIce = [];
   pcReady = null;
   document.getElementById("remote").srcObject = null;
+  document.getElementById("local").srcObject = null;
+  document.body.className = "";
 }
 
 async function start(caller, media) {
@@ -44,10 +59,18 @@ async function start(caller, media) {
       video: media === "video",
     });
   } catch (e) {
-    if (gen === generation) fail("Micro inaccessible (" + e.name + ") : vérifiez qu'un micro est branché et autorisé.");
+    if (gen === generation) {
+      fail(media === "video"
+        ? "Caméra ou micro inaccessible (" + e.name + ") : vérifiez qu'ils sont branchés et libres."
+        : "Micro inaccessible (" + e.name + ") : vérifiez qu'un micro est branché et autorisé.");
+    }
     return;
   }
   if (gen !== generation) { stream.getTracks().forEach(t => t.stop()); return; }
+  if (media === "video") {
+    document.body.classList.add("video");
+    document.getElementById("local").srcObject = stream;
+  }
   pc = new RTCPeerConnection({ iceServers: [] });
   stream.getTracks().forEach(t => pc.addTrack(t, stream));
   pc.onicecandidate = (e) => {
@@ -56,9 +79,9 @@ async function start(caller, media) {
     }
   };
   pc.ontrack = (e) => {
-    const audio = document.getElementById("remote");
-    audio.srcObject = e.streams[0];
-    audio.play().catch(() => {});
+    const remote = document.getElementById("remote");
+    if (remote.srcObject !== e.streams[0]) remote.srcObject = e.streams[0];
+    remote.play().catch(() => {});
   };
   pc.onconnectionstatechange = () => {
     if (gen !== generation) return;
@@ -105,6 +128,12 @@ function setMuted(muted) {
   if (stream) stream.getAudioTracks().forEach(t => { t.enabled = !muted; });
 }
 
+// Caméra coupée : le correspondant reçoit une image noire, la liaison reste ouverte.
+function setCamera(on) {
+  if (stream) stream.getVideoTracks().forEach(t => { t.enabled = on; });
+  document.body.classList.toggle("camera-off", !on);
+}
+
 // Sonnerie : deux tons (440 + 480 Hz), 1 s sur 3, comme un téléphone.
 function ring(on) {
   if (ringTimer) { clearInterval(ringTimer); ringTimer = null; }
@@ -130,11 +159,14 @@ function ring(on) {
   ringTimer = setInterval(beep, 3000);
 }
 
+// Octets reçus du correspondant : [son, image].
 async function inboundBytes() {
-  if (!pc) return 0;
-  let total = 0;
-  (await pc.getStats()).forEach(r => { if (r.type === "inbound-rtp") total += r.bytesReceived || 0; });
-  return total;
+  const total = { audio: 0, video: 0 };
+  if (!pc) return [0, 0];
+  (await pc.getStats()).forEach(r => {
+    if (r.type === "inbound-rtp" && r.kind in total) total[r.kind] += r.bytesReceived || 0;
+  });
+  return [total.audio, total.video];
 }
 
 new QWebChannel(qt.webChannelTransport, (channel) => {
@@ -145,7 +177,8 @@ new QWebChannel(qt.webChannelTransport, (channel) => {
   bridge.muteRequested.connect(setMuted);
   bridge.stopRequested.connect(reset);
   bridge.ringRequested.connect(ring);
-  bridge.statsRequested.connect(async () => bridge.stats(await inboundBytes()));
+  bridge.cameraRequested.connect(setCamera);
+  bridge.statsRequested.connect(async () => bridge.stats(...(await inboundBytes())));
   bridge.ready();
 });
 </script>

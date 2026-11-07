@@ -55,6 +55,7 @@ class MainWindow(QMainWindow):
         *,
         calls: CallManager | None = None,
         ring: Callable[[bool], None] | None = None,
+        video_view: Callable[[QWidget], QWidget] | None = None,
     ):
         super().__init__(parent)
         self.settings = settings
@@ -63,6 +64,7 @@ class MainWindow(QMainWindow):
         #: Appels audio (``None`` : moteur WebEngine indisponible).
         self.calls = calls
         self._ring = ring
+        self._video_view = video_view
         #: Fermer la fenêtre la masque (vrai seulement si une zone de notification existe).
         self.close_to_tray = False
         self.tray_available = False
@@ -147,9 +149,15 @@ class MainWindow(QMainWindow):
         )
         self.call_window: CallWindow | None = None
         if self.calls is not None:
-            self.call_window = CallWindow(self.calls, self.messenger, self._ring, self)
+            self.call_window = CallWindow(
+                self.calls, self.messenger, self._ring, self, video_view=self._video_view
+            )
             self.conversation.call_button.setVisible(True)
+            self.conversation.video_button.setVisible(True)
             self.conversation.call_requested.connect(self.start_call)
+            self.conversation.video_call_requested.connect(
+                lambda contact_id: self.start_call(contact_id, "video")
+            )
             self.calls.incoming_call.connect(self._on_incoming_call)
             self.calls.error.connect(lambda text: QMessageBox.warning(self, APP_TITLE, text))
 
@@ -268,18 +276,19 @@ class MainWindow(QMainWindow):
         self.raise_()
         self.activateWindow()
 
-    def start_call(self, contact_id: str) -> None:
+    def start_call(self, contact_id: str, media: str = "audio") -> None:
         if self.calls is None:
             return
         try:
-            self.calls.start_call(contact_id)
+            self.calls.start_call(contact_id, media)
         except ValueError as exc:
             QMessageBox.warning(self, APP_TITLE, str(exc))
 
-    def _on_incoming_call(self, contact_id: str, _media: str) -> None:
+    def _on_incoming_call(self, contact_id: str, media: str) -> None:
         contact = self.messenger.store.contact(contact_id)
         name = contact.name if contact else "Un collègue"
-        self.notify.emit(contact_id, name, "📞 Appel audio entrant")
+        kind = "🎥 Appel vidéo entrant" if media == "video" else "📞 Appel audio entrant"
+        self.notify.emit(contact_id, name, kind)
 
     def request_quit(self) -> None:
         self._quitting = True
