@@ -133,6 +133,8 @@ class CallInfo {
   final CallOutcome outcome;
   final int duration; // secondes de conversation
 
+  String get icon => media == 'video' ? '🎥' : '📞';
+
   String label(bool outgoing) {
     final kind = media == 'video' ? 'vidéo' : 'audio';
     return switch (outcome) {
@@ -219,14 +221,14 @@ class MessageRecord {
     final f = file;
     if (f != null) return f.isImage ? '🖼 Image' : '📎 ${f.name}';
     final c = call;
-    if (c != null) return '📞 ${c.label(outgoing)}';
+    if (c != null) return '${c.icon} ${c.label(outgoing)}';
     return text.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).join(' ');
   }
 
   /// Texte affiché dans la bulle (libellé de l'appel pour un appel noté).
   String get displayText {
     final c = call;
-    return c == null ? text : '📞 ${c.label(outgoing)}';
+    return c == null ? text : '${c.icon} ${c.label(outgoing)}';
   }
 
   String reactionOf(String author) {

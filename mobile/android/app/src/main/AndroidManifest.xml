@@ -10,6 +10,9 @@
     <!-- Appels : micro (demandé au premier appel), écouteur ou haut-parleur, casque
          Bluetooth, vibration de la sonnerie, écran éteint contre l'oreille. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Appels vidéo : caméra, demandée au premier appel vidéo. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
@@ -22,6 +25,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
@@ -56,7 +60,7 @@
         <service
             android:name=".MessagingService"
             android:exported="false"
-            android:foregroundServiceType="remoteMessaging|microphone" />
+            android:foregroundServiceType="remoteMessaging|microphone|camera" />
         <receiver
             android:name=".BootReceiver"
             android:exported="false">

@@ -84,8 +84,9 @@ class BackgroundPlatform {
   /// Garde Socket Chat joignable application fermée (service au premier plan) ou non.
   Future<void> setKeepRunning(bool on) => _call('setKeepRunning', {'on': on});
 
-  /// Appel en cours : le service déclare l'usage du micro (Android 14).
-  Future<void> setInCall(bool on) => _call('setInCall', {'on': on});
+  /// Appel en cours : le service déclare l'usage du micro, et de la caméra en vidéo
+  /// (Android 14).
+  Future<void> setInCall(bool on, {bool video = false}) => _call('setInCall', {'on': on, 'video': video});
 
   /// Pendant un appel, l'écran s'affiche par-dessus le verrouillage.
   Future<void> setCallMode(bool on) => _call('setCallMode', {'on': on});
@@ -97,8 +98,8 @@ class BackgroundPlatform {
   Future<void> cancelMessages(String contactId) => _call('cancelMessages', {'contact': contactId});
 
   /// Appel entrant : notification plein écran avec Répondre et Refuser.
-  Future<void> showIncomingCall(String callId, String contactId, String name) =>
-      _call('showIncomingCall', {'call': callId, 'contact': contactId, 'name': name});
+  Future<void> showIncomingCall(String callId, String contactId, String name, {bool video = false}) =>
+      _call('showIncomingCall', {'call': callId, 'contact': contactId, 'name': name, 'video': video});
 
   Future<void> cancelIncomingCall() => _call('cancelIncomingCall');
 

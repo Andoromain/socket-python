@@ -13,7 +13,7 @@
 //   {"cmd": "typing", "to": "<id>", "active": true}
 //   {"cmd": "avatar", "data": "<base64>"}          (vide : photo retirée)
 //   {"cmd": "discover", "target_port": 45678}
-//   {"cmd": "call", "to": "<id>"} · {"cmd": "accept_call"} · {"cmd": "decline_call"}
+//   {"cmd": "call", "to": "<id>", "media": "video"} · {"cmd": "accept_call"} · {"cmd": "decline_call"}
 //   {"cmd": "hangup"}                (média simulé : signalisation seulement)
 //   {"cmd": "quit"}
 // Événements (une ligne JSON par événement sur la sortie standard) : started,
@@ -134,7 +134,8 @@ Future<void> main(List<String> args) async {
             emit('discovery', {'port': d.localPort});
             d.announce();
           case 'call':
-            emit('result', {'id': calls.startCall(command['to']! as String).id});
+            final media = command['media'] as String? ?? 'audio';
+            emit('result', {'id': calls.startCall(command['to']! as String, media).id});
           case 'accept_call':
             calls.accept();
           case 'decline_call':

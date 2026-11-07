@@ -76,10 +76,14 @@ class FakeEngine extends MediaEngine {
   final remoteIce = <(String, String, int)>[];
   bool muted = false;
   bool speaker = false;
+  bool camera = true;
+  int switches = 0;
+  String media = '';
   bool stopped = false;
 
   @override
   Future<void> start({required bool caller, required String media}) async {
+    this.media = media;
     if (caller) Timer.run(() => localDescription.emit(('offer', 'v=0 offre')));
     Timer.run(() => localIce.emit(('candidate:1 1 udp 1 10.0.0.1 1 typ host', '0', 0)));
   }
@@ -98,6 +102,12 @@ class FakeEngine extends MediaEngine {
 
   @override
   void setSpeaker(bool on) => speaker = on;
+
+  @override
+  void setCameraEnabled(bool on) => camera = on;
+
+  @override
+  Future<void> switchCamera() async => switches++;
 
   @override
   Future<void> stop() async => stopped = true;

@@ -82,7 +82,7 @@ object Notifications {
     }
 
     /** Appel entrant : plein écran (écran verrouillé), sinon bandeau avec Répondre / Refuser. */
-    fun incomingCall(context: Context, callId: String, contactId: String, name: String) {
+    fun incomingCall(context: Context, callId: String, contactId: String, name: String, video: Boolean) {
         val screen = Intent(context, MainActivity::class.java)
             .putExtra(MainActivity.EXTRA_CALL, callId)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
@@ -101,7 +101,7 @@ object Notifications {
         )
         val notification = builder(context, CALLS_CHANNEL)
             .setContentTitle(name.ifEmpty { "Appel entrant" })
-            .setContentText("Appel audio entrant")
+            .setContentText(if (video) "Appel vidéo entrant" else "Appel audio entrant")
             .setCategory(Notification.CATEGORY_CALL)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setOngoing(true)

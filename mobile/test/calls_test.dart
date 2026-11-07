@@ -161,4 +161,31 @@ void main() {
     alice.startCall(b.userId);
     expect(() => alice.startCall(b.userId), throwsStateError);
   });
+
+  test('appel vidéo : caméra coupée avant le décroché, retournée, haut-parleur d\'office', () async {
+    final incoming = next(bob.incomingCall);
+    final call = alice.startCall(b.userId, 'video');
+    expect(await incoming, (a.userId, 'video'));
+    expect(call.video && call.speaker, isTrue);
+    alice.setCameraEnabled(false);
+    bob.accept();
+    await waitUntil(() => alice.call?.state == CallState.active);
+    final engine = alice.call!.engine! as FakeEngine;
+    expect([engine.media, engine.camera, engine.speaker], ['video', false, true]);
+    alice.setCameraEnabled(true);
+    await alice.switchCamera();
+    expect([engine.camera, engine.switches, alice.call!.cameraOff], [true, 1, false]);
+    final ended = next(bob.callEnded);
+    alice.hangup();
+    await ended;
+    expect(lastCall(a, b.userId).preview, startsWith('🎥 Appel vidéo · '));
+  });
+
+  test('caméra ignorée pour un appel audio', () async {
+    final call = alice.startCall(b.userId);
+    expect(call.speaker, isFalse);
+    alice.setCameraEnabled(false);
+    expect(call.cameraOff, isFalse);
+    alice.hangup();
+  });
 }

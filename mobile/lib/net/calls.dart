@@ -52,6 +52,12 @@ abstract class MediaEngine {
 
   /// Haut-parleur (sinon écouteur) ; sans effet hors téléphone.
   void setSpeaker(bool on) {}
+
+  /// Appel vidéo : coupe ou rétablit la caméra (image noire chez le correspondant).
+  void setCameraEnabled(bool on) {}
+
+  /// Appel vidéo : caméra avant ou arrière.
+  Future<void> switchCamera() async {}
   Future<void> stop();
 }
 
@@ -66,7 +72,14 @@ class Call {
   CallState state;
   Stopwatch? _talking;
   bool muted = false;
-  bool speaker = false;
+
+  /// Haut-parleur : d'office en vidéo (téléphone tenu devant soi), écouteur sinon.
+  late bool speaker = video;
+
+  /// Appel vidéo : caméra coupée.
+  bool cameraOff = false;
+
+  bool get video => media == 'video';
   MediaEngine? engine;
 
   /// Secondes de conversation.
@@ -156,6 +169,16 @@ class CallManager {
     stateChanged.emit(current);
   }
 
+  void setCameraEnabled(bool on) {
+    final current = call;
+    if (current == null || !current.video) return;
+    current.cameraOff = !on;
+    current.engine?.setCameraEnabled(on);
+    stateChanged.emit(current);
+  }
+
+  Future<void> switchCamera() async => call?.engine?.switchCamera();
+
   /// Arrêt de l'application : raccroche proprement.
   void stop() => hangup();
 
@@ -236,6 +259,7 @@ class CallManager {
     engine.start(caller: caller, media: current.media).catchError((Object e) => _onMediaFailed(callId, '$e'));
     if (current.muted) engine.setMuted(true);
     if (current.speaker) engine.setSpeaker(true);
+    if (current.cameraOff) engine.setCameraEnabled(false);
   }
 
   void _sendIfCurrent(String callId, String contactId, Message message) {

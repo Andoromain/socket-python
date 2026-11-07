@@ -28,7 +28,7 @@ class FakeBackground extends BackgroundPlatform {
   @override
   Future<void> setKeepRunning(bool on) async => calls.add('keepRunning:$on');
   @override
-  Future<void> setInCall(bool on) async => calls.add('inCall:$on');
+  Future<void> setInCall(bool on, {bool video = false}) async => calls.add('inCall:$on${video ? ':video' : ''}');
   @override
   Future<void> setCallMode(bool on) async => calls.add('callMode:$on');
   @override
@@ -37,7 +37,8 @@ class FakeBackground extends BackgroundPlatform {
   @override
   Future<void> cancelMessages(String contactId) async => calls.add('cancelMessages');
   @override
-  Future<void> showIncomingCall(String callId, String contactId, String name) async => calls.add('incoming:$name');
+  Future<void> showIncomingCall(String callId, String contactId, String name, {bool video = false}) async =>
+      calls.add('incoming:$name${video ? ':video' : ''}');
   @override
   Future<void> cancelIncomingCall() async => calls.add('cancelIncoming');
   @override

@@ -236,6 +236,14 @@ class _ConversationScreenState extends State<ConversationScreen> {
               ),
               actions: [
                 IconButton(
+                  key: const ValueKey('video-button'),
+                  tooltip: online ? 'Appel vidéo' : 'Appel vidéo : contact hors ligne',
+                  icon: const Icon(Icons.videocam_outlined),
+                  onPressed: online && controller.calls.call == null
+                      ? () => controller.startCall(contactId, 'video')
+                      : null,
+                ),
+                IconButton(
                   key: const ValueKey('call-button'),
                   tooltip: online ? 'Appel audio' : 'Appel audio : contact hors ligne',
                   icon: const Icon(Icons.call),
