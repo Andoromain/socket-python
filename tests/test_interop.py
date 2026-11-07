@@ -271,5 +271,16 @@ def test_calls_signaling_between_pc_and_phone(qtbot, make_messenger, phone):
     phone.wait(qtbot, "call_state", state="ringingOut")
     calls.decline()
     phone.wait(qtbot, "call_ended", contact=pc.user_id, outcome="declined")
-    outcomes = [m.call.outcome.value for m in pc.store.messages(phone.id) if m.call]
-    assert outcomes == ["completed", "declined"]
+
+    # Appel vidéo téléphone → PC : décroché par le PC, raccroché par le téléphone.
+    with qtbot.waitSignal(calls.incoming_call, timeout=TIMEOUT) as blocker:
+        phone.command("call", to=pc.user_id, media="video")
+    assert blocker.args == [phone.id, "video"]
+    calls.accept()
+    qtbot.waitUntil(lambda: calls.call and calls.call.state is CallState.ACTIVE, timeout=TIMEOUT)
+    assert calls.call.engine.media == "video"
+    with qtbot.waitSignal(calls.call_ended, timeout=TIMEOUT):
+        phone.command("hangup")
+    records = [m for m in pc.store.messages(phone.id) if m.call]
+    assert [m.call.outcome.value for m in records] == ["completed", "declined", "completed"]
+    assert records[-1].display_text.startswith("🎥 Appel vidéo · ")

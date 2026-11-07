@@ -1,5 +1,26 @@
 # Journal des modifications
 
+## 3.8.0
+
+Compatible avec la 3.6 et la 3.7 (même protocole). Un correspondant encore en 3.6 ou
+3.7 peut répondre à un appel vidéo, mais sans en voir l'image : mettre tout le monde à
+jour (les PC et les téléphones se mettent à jour d'eux-mêmes).
+
+### Ajouté
+- **Appels vidéo** entre PC et téléphones, dans tous les sens : bouton 🎥 à côté de 📞
+  dans l'en-tête de conversation, « Appel vidéo entrant » (fenêtre, notification).
+- **PC** : l'image du correspondant s'affiche dans la fenêtre d'appel, la sienne en
+  incrustation (effet miroir) ; **Couper la caméra** / **Rétablir la caméra**.
+- **Android** : image du correspondant en plein écran, la sienne en incrustation ;
+  boutons micro, caméra, **retourner** (caméra avant ou arrière) et raccrocher ;
+  haut-parleur d'office. Application fermée, l'appel vidéo sonne en plein écran comme
+  un appel audio ; la caméra reste active écran éteint pendant l'appel.
+- Historique : 🎥 « Appel vidéo · 3 min 12 ».
+
+### À savoir
+- Android demande l'accès à la **caméra** au premier appel vidéo.
+- Caméra coupée, le correspondant voit une image noire ; l'appel continue.
+
 ## 3.7.0
 
 Compatible avec la 3.6 (même protocole) : rien ne change sur les postes Windows et Linux.

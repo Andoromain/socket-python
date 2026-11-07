@@ -85,7 +85,9 @@ class Platform(private val app: Context, engine: FlutterEngine) {
         background.setMethodCallHandler { call, result ->
             when (call.method) {
                 "setKeepRunning" -> result.done { setKeepRunning(call.argument<Boolean>("on") == true) }
-                "setInCall" -> result.done { setInCall(call.argument<Boolean>("on") == true) }
+                "setInCall" -> result.done {
+                    setInCall(call.argument<Boolean>("on") == true, call.argument<Boolean>("video") == true)
+                }
                 "notifyMessages" -> {
                     Notifications.messages(
                         app,
@@ -103,6 +105,7 @@ class Platform(private val app: Context, engine: FlutterEngine) {
                         call.argument<String>("call") ?: "",
                         call.argument<String>("contact") ?: "",
                         call.argument<String>("name") ?: "",
+                        call.argument<Boolean>("video") == true,
                     )
                     result.success(null)
                 }
@@ -150,9 +153,10 @@ class Platform(private val app: Context, engine: FlutterEngine) {
         if (on) MessagingService.start(app) else if (!MessagingService.inCall) MessagingService.stop(app)
     }
 
-    /** En appel, le service déclare l'usage du micro (exigé par Android 14 hors de l'écran). */
-    private fun setInCall(on: Boolean) {
+    /** En appel, le service déclare le micro, et la caméra en vidéo (exigé par Android 14). */
+    private fun setInCall(on: Boolean, video: Boolean) {
         MessagingService.inCall = on
+        MessagingService.inVideo = on && video
         if (on || Prefs.keepRunning(app)) MessagingService.start(app) else MessagingService.stop(app)
     }
 

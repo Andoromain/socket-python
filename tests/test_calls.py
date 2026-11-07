@@ -21,6 +21,7 @@ class FakeEngine(MediaEngine):
         super().__init__()
         self.remote_ice: list[tuple[str, str, int]] = []
         self.muted = False
+        self.camera = True
         self.stopped = False
         FakeEngine.instances.append(self)
 
@@ -49,6 +50,9 @@ class FakeEngine(MediaEngine):
 
     def add_remote_ice(self, candidate, mid, index):
         self.remote_ice.append((candidate, mid, index))
+
+    def set_camera_enabled(self, on):
+        self.camera = on
 
     def set_muted(self, muted):
         self.muted = muted
@@ -231,3 +235,30 @@ def test_fake_engine_deleted_with_pending_emits(qtbot):
     engine.stop()
     engine.deleteLater()  # comme CallManager._finish
     qtbot.wait(50)
+
+
+def test_video_call_and_camera(qtbot, phones):
+    alice, bob = phones
+    with qtbot.waitSignal(bob.incoming_call, timeout=TIMEOUT) as blocker:
+        call = alice.start_call(ids(bob), "video")
+    assert blocker.args[1] == "video" and call.video
+    alice.set_camera_enabled(False)  # avant le décroché : appliqué au moteur à son démarrage
+    bob.accept()
+    qtbot.waitUntil(
+        lambda: alice.call is not None and alice.call.state is CallState.ACTIVE, timeout=TIMEOUT
+    )
+    engine = alice.call.engine
+    assert engine.media == "video" and engine.camera is False
+    alice.set_camera_enabled(True)
+    assert engine.camera and not alice.call.camera_off
+    with qtbot.waitSignal(bob.call_ended, timeout=TIMEOUT):
+        alice.hangup()
+    assert last_call_record(alice, ids(bob)).display_text.startswith("🎥 Appel vidéo · ")
+
+
+def test_camera_ignored_for_audio_calls(qtbot, phones):
+    alice, bob = phones
+    alice.start_call(ids(bob))
+    alice.set_camera_enabled(False)
+    assert not alice.call.camera_off
+    alice.hangup()

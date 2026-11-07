@@ -132,6 +132,10 @@ class CallInfo:
     outcome: CallOutcome
     duration: int = 0  # secondes de conversation
 
+    @property
+    def icon(self) -> str:
+        return "🎥" if self.media == "video" else "📞"
+
     def label(self, outgoing: bool) -> str:
         kind = "vidéo" if self.media == "video" else "audio"
         match self.outcome:
@@ -212,14 +216,14 @@ class MessageRecord:
         if self.file is not None:
             return "🖼 Image" if self.file.is_image else f"📎 {self.file.name}"
         if self.call is not None:
-            return f"📞 {self.call.label(self.outgoing)}"
+            return f"{self.call.icon} {self.call.label(self.outgoing)}"
         return " ".join(self.text.split())
 
     @property
     def display_text(self) -> str:
         """Texte de la bulle : le message, ou la mention d'un appel."""
         if self.call is not None:
-            return f"📞 {self.call.label(self.outgoing)}"
+            return f"{self.call.icon} {self.call.label(self.outgoing)}"
         return self.text
 
     def reaction_of(self, author: str) -> str:

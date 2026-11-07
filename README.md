@@ -15,8 +15,8 @@ central :
   (👍 ❤️ 😂…) ;
 - **envoi de fichiers et d'images** (bouton 📎, glisser-déposer, Ctrl+V d'une capture) :
   le destinataire voit un aperçu et accepte ou refuse ;
-- **appels audio** entre PC et téléphones (bouton 📞) : son direct d'un appareil à
-  l'autre, avec annulation d'écho et réduction de bruit ;
+- **appels audio et vidéo** entre PC et téléphones (boutons 📞 et 🎥) : son et image
+  directs d'un appareil à l'autre, avec annulation d'écho et réduction de bruit ;
 - **notifications** et compteur de non-lus dans la zone de notification, où
   l'application reste active quand on ferme la fenêtre.
 
@@ -119,8 +119,11 @@ fois : il était signé avec une autre clé et Android refuse de le remplacer.
 
 Déjà disponible : détection des collègues, ajout par adresse, conversations, coches,
 « écrit… », emojis et réactions (appui long sur une bulle), messages hors ligne remis
-plus tard, photo de profil, **appels audio** avec les PC et les autres téléphones
-(bouton 📞 de la conversation ; Android demande l'accès au micro au premier appel).
+plus tard, photo de profil, **appels audio et vidéo** avec les PC et les autres
+téléphones (boutons 📞 et 🎥 de la conversation ; Android demande l'accès au micro, et
+à la caméra, au premier appel). En vidéo, l'image du correspondant occupe l'écran, la
+sienne s'affiche en incrustation ; boutons micro, caméra, retourner (caméra avant ou
+arrière) et raccrocher. Le haut-parleur est activé d'office en vidéo.
 Une offre de fichier venant d'un PC s'affiche et peut être refusée.
 
 <p align="center"><img src="docs/appel-android.png" alt="Android : appel entrant, appel en cours, appels dans la conversation" width="720"></p>
@@ -232,7 +235,7 @@ Pour un dossier réseau, y copier les fichiers de la Release (installeurs et
 | Envoyer un fichier | Bouton 📎, glisser-déposer dans la conversation, ou `Ctrl+V` (fichier copié ou capture d'écran) |
 | Recevoir un fichier | **Accepter** (on choisit où l'enregistrer) ou **Refuser** dans la bulle ; puis **Ouvrir** / **Dossier** |
 | Copier un message | Clic droit sur la bulle |
-| Appeler un collègue | Bouton 📞 en haut de la conversation (collègue en ligne). Pendant l'appel : **Couper le micro**, **Raccrocher** |
+| Appeler un collègue | Bouton 📞 (audio) ou 🎥 (vidéo) en haut de la conversation (collègue en ligne). Pendant l'appel : **Couper le micro**, **Couper la caméra** (vidéo), **Raccrocher** |
 | Répondre à un appel | Une fenêtre s'ouvre et sonne : **Répondre** ou **Refuser** |
 | Changer de nom, de port, le comportement à la fermeture | **Socket Chat › Préférences…** |
 | Mettre ou retirer sa photo de profil | **Socket Chat › Préférences…** › Choisir une photo… (sur Android : Préférences, toucher la pastille) |
@@ -264,7 +267,7 @@ Pour un dossier réseau, y copier les fichiers de la Release (installeurs et
 | **12800/TCP** | messages (modifiable dans les préférences) |
 | **12801/UDP** | détection des collègues (annonces diffusées sur le réseau local) |
 
-| UDP, ports variables | son des appels (WebRTC), directement entre les deux appareils |
+| UDP, ports variables | son et image des appels (WebRTC), directement entre les deux appareils |
 
 La détection utilise la diffusion (broadcast) : elle ne franchit pas les routeurs et peut
 être filtrée sur certains réseaux. Dans ce cas, l'ajout par adresse fonctionne toujours.

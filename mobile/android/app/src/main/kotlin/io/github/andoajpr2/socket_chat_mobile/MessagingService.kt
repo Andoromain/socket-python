@@ -16,39 +16,62 @@ import android.util.Log
  * qu'il tourne, Android n'arrête pas le processus, et la messagerie Dart (moteur Flutter
  * de [SocketChatApplication]) continue de recevoir messages et appels. Il affiche la
  * notification permanente qu'Android exige. Pendant un appel, il déclare aussi l'usage
- * du micro, sans quoi Android 14 couperait le micro dès que l'écran n'est plus visible.
+ * du micro (et de la caméra en vidéo), sans quoi Android 14 les couperait dès que
+ * l'écran n'est plus visible.
  */
 class MessagingService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val notification = Notifications.service(this)
         try {
-            val notification = Notifications.service(this)
-            if (Build.VERSION.SDK_INT >= 34) {
-                var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING
-                if (inCall && hasMicrophone()) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-                startForeground(Notifications.SERVICE_ID, notification, type)
-            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                val type = if (inCall && hasMicrophone()) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0
-                startForeground(Notifications.SERVICE_ID, notification, type)
-            } else {
-                startForeground(Notifications.SERVICE_ID, notification)
-            }
+            startForeground(notification, callTypes())
         } catch (e: Exception) {
-            // Démarrage refusé (arrière-plan, autorisation) : l'application reste utilisable.
-            Log.w(Platform.TAG, "Service au premier plan refusé", e)
-            stopSelf()
+            // Micro ou caméra refusés hors de l'écran : on garde au moins la messagerie.
+            Log.w(Platform.TAG, "Service au premier plan : micro ou caméra refusés", e)
+            try {
+                startForeground(notification, 0)
+            } catch (e2: Exception) {
+                // Démarrage refusé (arrière-plan, autorisation) : l'application reste utilisable.
+                Log.w(Platform.TAG, "Service au premier plan refusé", e2)
+                stopSelf()
+            }
         }
         return START_STICKY
     }
 
-    private fun hasMicrophone() =
-        checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+    /** Types d'usage déclarés en plus de la messagerie pendant un appel (Android 11+). */
+    private fun callTypes(): Int {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return 0
+        var type = 0
+        if (inCall && granted(Manifest.permission.RECORD_AUDIO)) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        if (inVideo && granted(Manifest.permission.CAMERA)) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+        return type
+    }
+
+    private fun startForeground(notification: android.app.Notification, extra: Int) {
+        when {
+            Build.VERSION.SDK_INT >= 34 -> startForeground(
+                Notifications.SERVICE_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING or extra,
+            )
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R ->
+                startForeground(Notifications.SERVICE_ID, notification, extra)
+            else -> startForeground(Notifications.SERVICE_ID, notification)
+        }
+    }
+
+    private fun granted(permission: String) = checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
 
     companion object {
         /** Un appel est en cours (le service déclare alors le micro). */
         @Volatile
         var inCall = false
+
+        /** L'appel en cours est un appel vidéo (le service déclare aussi la caméra). */
+        @Volatile
+        var inVideo = false
 
         fun start(context: Context) {
             val intent = Intent(context, MessagingService::class.java)

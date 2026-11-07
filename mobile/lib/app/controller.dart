@@ -220,9 +220,9 @@ class ChatController extends ChangeNotifier {
 
   // -- Appels -----------------------------------------------------------
   /// Appelle un contact ; `false` (avec un message d'erreur) si c'est impossible.
-  bool startCall(String contactId) {
+  bool startCall(String contactId, [String media = 'audio']) {
     try {
-      calls.startCall(contactId);
+      calls.startCall(contactId, media);
       return true;
     } on StateError catch (e) {
       errors.emit(e.message);
@@ -236,7 +236,12 @@ class ChatController extends ChangeNotifier {
     final ringing = call?.state == CallState.incoming;
     if (ringing && !_visible && !_callNotified) {
       _callNotified = true;
-      background.showIncomingCall(call!.id, call.contactId, store.contact(call.contactId)?.name ?? '');
+      background.showIncomingCall(
+        call!.id,
+        call.contactId,
+        store.contact(call.contactId)?.name ?? '',
+        video: call.video,
+      );
     } else if (!ringing && _callNotified) {
       _callNotified = false;
       background.cancelIncomingCall();
@@ -244,7 +249,7 @@ class ChatController extends ChangeNotifier {
     final inCall = call != null && (call.state == CallState.connecting || call.state == CallState.active);
     if (inCall != _inCall) {
       _inCall = inCall;
-      background.setInCall(inCall);
+      background.setInCall(inCall, video: call?.video ?? false);
     }
     if ((call != null) != _callMode) {
       _callMode = call != null;

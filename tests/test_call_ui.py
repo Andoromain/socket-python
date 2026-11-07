@@ -2,6 +2,7 @@
 
 import pytest
 from PySide6.QtCore import QSettings, Qt
+from PySide6.QtWidgets import QLabel
 from test_calls import FakeEngine
 
 from socket_chat.calls import CallManager, CallState
@@ -22,7 +23,13 @@ def windows(qtbot, tmp_path, make_messenger):
         messenger = make_messenger(name)
         rings = []
         calls = CallManager(messenger, FakeEngine, parent=messenger)
-        window = MainWindow(settings, messenger, calls=calls, ring=rings.append)
+        window = MainWindow(
+            settings,
+            messenger,
+            calls=calls,
+            ring=rings.append,
+            video_view=lambda parent: QLabel("image", parent),
+        )
         window.rings = rings
         qtbot.addWidget(window)
         window.show()
@@ -107,3 +114,27 @@ def test_no_call_button_without_webengine(qtbot, tmp_path, make_messenger):
     window = MainWindow(settings, make_messenger("Solo"))
     qtbot.addWidget(window)
     assert window.call_window is None and not window.conversation.call_button.isVisibleTo(window)
+
+
+def test_video_call_window(qtbot, windows):
+    alice, bob = windows
+    assert alice.conversation.video_button.isVisible()
+    with qtbot.waitSignal(bob.calls.incoming_call, timeout=TIMEOUT):
+        qtbot.mouseClick(alice.conversation.video_button, Qt.MouseButton.LeftButton)
+    incoming = bob.call_window
+    assert incoming.status_label.text() == "Appel vidéo entrant"
+    assert incoming.video_view is None and incoming.avatar.isVisible()
+
+    qtbot.mouseClick(incoming.answer_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: bob.calls.call and bob.calls.call.state is CallState.ACTIVE)
+    window = alice.call_window
+    qtbot.waitUntil(lambda: window.video_view is not None and window.video_view.isVisible())
+    assert not window.avatar.isVisible() and window.camera_button.isVisible()
+    qtbot.mouseClick(window.camera_button, Qt.MouseButton.LeftButton)
+    assert alice.calls.call.camera_off and "caméra coupée" in window.status_label.text()
+
+    with qtbot.waitSignal(bob.calls.call_ended, timeout=TIMEOUT):
+        qtbot.mouseClick(window.hangup_button, Qt.MouseButton.LeftButton)
+    assert not window.isVisible() and not window.camera_button.isChecked()
+    model = alice.conversation.model
+    assert model.data(model.index(model.rowCount() - 1)).startswith("🎥 Appel vidéo · ")

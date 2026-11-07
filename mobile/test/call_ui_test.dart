@@ -88,6 +88,52 @@ void main() {
     await tearDownCall(tester);
   });
 
+  testWidgets('appel vidéo : bouton de la conversation, caméra, retourner, raccrocher', (tester) async {
+    await setUpCall(tester);
+    await tester.tap(find.text('Bob Durand'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('video-button')));
+    await waitFor(tester, () => peerCalls.call?.state == CallState.incoming);
+    expect(peerCalls.call!.media, 'video');
+    peerCalls.accept();
+    await waitFor(tester, () => controller.calls.call?.state == CallState.active);
+    // Image en plein écran : commandes vidéo (pas d'écouteur, haut-parleur d'office).
+    expect(find.byKey(const ValueKey('call-camera')), findsOneWidget);
+    expect(find.byKey(const ValueKey('call-speaker')), findsNothing);
+    final engine = controller.calls.call!.engine! as FakeEngine;
+    expect([engine.media, engine.speaker], ['video', true]);
+
+    await tester.tap(find.byKey(const ValueKey('call-camera')));
+    await tester.pump();
+    expect([engine.camera, controller.calls.call!.cameraOff], [false, true]);
+    expect(find.text('Caméra coupée'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('call-camera')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('call-switch-camera')));
+    await tester.pump();
+    expect([engine.camera, engine.switches], [true, 1]);
+
+    await tester.tap(find.byKey(const ValueKey('call-hangup')));
+    await waitFor(tester, () => peerCalls.call == null);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('call-camera')), findsNothing);
+    expect(find.text('🎥 Appel vidéo · 0 s'), findsOneWidget);
+    await tearDownCall(tester);
+  });
+
+  testWidgets('appel vidéo entrant : « Appel vidéo entrant »', (tester) async {
+    await setUpCall(tester);
+    await tester.runAsync(() async => peerCalls.startCall(controller.messenger.userId, 'video'));
+    await waitFor(tester, () => controller.calls.call?.state == CallState.incoming);
+    expect(find.text('Appel vidéo entrant'), findsOneWidget);
+    expect(find.byIcon(Icons.videocam), findsOneWidget); // bouton Répondre
+    await tester.tap(find.byKey(const ValueKey('call-decline')));
+    await waitFor(tester, () => peerCalls.call == null);
+    await tester.pumpAndSettle();
+    await tearDownCall(tester);
+  });
+
   testWidgets('appel entrant : répondre puis le correspondant raccroche', (tester) async {
     await setUpCall(tester);
     await tester.runAsync(() async => peerCalls.startCall(controller.messenger.userId));
