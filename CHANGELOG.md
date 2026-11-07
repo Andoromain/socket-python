@@ -1,5 +1,24 @@
 # Journal des modifications
 
+## 3.7.0
+
+Compatible avec la 3.6 (même protocole) : rien ne change sur les postes Windows et Linux.
+
+### Ajouté
+- **Android joignable application fermée** : Socket Chat reste actif en arrière-plan
+  (service au premier plan, notification permanente discrète), y compris après un
+  redémarrage du téléphone ou une mise à jour.
+- **Notifications** des nouveaux messages et des appels manqués, une par conversation
+  (les derniers messages non lus) ; un toucher ouvre la conversation. Rien n'est notifié
+  pour la conversation affichée à l'écran.
+- **Appel entrant application fermée** : sonnerie et vibration selon le mode du
+  téléphone, affichage en plein écran même téléphone verrouillé, boutons **Répondre** et
+  **Refuser** dans la notification. Pendant l'appel, le micro reste actif écran éteint
+  ou application en arrière-plan.
+- Préférences › **Rester joignable** (activé par défaut), avec les autorisations encore
+  manquantes et un bouton vers chaque réglage d'Android : notifications, appels en plein
+  écran (Android 14+), optimisation de la batterie.
+
 ## 3.6.0
 
 Compatible avec la 3.5 (même protocole) : un poste en version antérieure ignore les
