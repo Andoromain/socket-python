@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../app/controller.dart';
 import '../net/calls.dart';
 import 'call_screen.dart';
+import 'conversation_screen.dart';
 import 'contacts_screen.dart';
 import 'format.dart';
 import 'welcome_screen.dart';
@@ -46,9 +47,29 @@ class _SocketChatAppState extends State<SocketChatApp> {
     super.initState();
     controller.errors.connect(_showError);
     controller.calls.stateChanged.connect(_onCall);
-    _lifecycle = AppLifecycleListener(
-      onResume: () => controller.setVisible(true),
-      onHide: () => controller.setVisible(false),
+    controller.conversationRequested.connect(_openConversation);
+    // La messagerie tourne aussi sans écran (application fermée) : elle n'est « vue »
+    // que lorsque l'écran est affiché, sinon les nouveaux messages sont notifiés.
+    _lifecycle = AppLifecycleListener(onStateChange: _onLifecycle);
+    final state = WidgetsBinding.instance.lifecycleState;
+    if (state != null) _onLifecycle(state);
+    controller.background.listen(controller.handleAction);
+  }
+
+  void _onLifecycle(AppLifecycleState state) {
+    final visible = state == AppLifecycleState.resumed || state == AppLifecycleState.inactive;
+    if (visible != controller.visible || state == AppLifecycleState.resumed) controller.setVisible(visible);
+  }
+
+  /// Toucher d'une notification de message : la conversation s'ouvre par-dessus la liste.
+  void _openConversation(String contactId) {
+    final navigator = _navigator.currentState;
+    if (navigator == null || controller.needsName) return;
+    if (controller.calls.call == null) navigator.popUntil((route) => route.isFirst);
+    navigator.push(
+      MaterialPageRoute<void>(
+        builder: (_) => ConversationScreen(controller: controller, contactId: contactId),
+      ),
     );
   }
 
@@ -56,6 +77,7 @@ class _SocketChatAppState extends State<SocketChatApp> {
   void dispose() {
     controller.errors.disconnect(_showError);
     controller.calls.stateChanged.disconnect(_onCall);
+    controller.conversationRequested.disconnect(_openConversation);
     _lifecycle.dispose();
     super.dispose();
   }

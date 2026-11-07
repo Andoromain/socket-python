@@ -15,10 +15,21 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Joignable application fermée : service au premier plan (messagerie, et micro
+         pendant un appel), relancé au démarrage du téléphone ; notifications des messages
+         et des appels (plein écran sur l'écran verrouillé) ; demande d'exclusion de
+         l'optimisation de batterie, proposée dans les Préférences. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application
         android:label="Socket Chat"
-        android:name="${applicationName}"
+        android:name=".SocketChatApplication"
         android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"
@@ -42,6 +53,21 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <service
+            android:name=".MessagingService"
+            android:exported="false"
+            android:foregroundServiceType="remoteMessaging|microphone" />
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name=".CallActionReceiver"
+            android:exported="false" />
         <!-- Donne à l'installateur l'accès au seul dossier des mises à jour (cache/updates). -->
         <provider
             android:name="androidx.core.content.FileProvider"
