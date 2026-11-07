@@ -45,12 +45,13 @@ class MemoryPreferenceStore implements PreferenceStore {
 
 /// Préférences de l'appareil : identifiant stable, nom affiché, port d'écoute.
 class Settings {
-  Settings._(this._prefs, this.userId, this.name, this.port, this.avatar);
+  Settings._(this._prefs, this.userId, this.name, this.port, this.avatar, this.keepRunning);
 
   static const _userIdKey = 'user_id';
   static const _nameKey = 'name';
   static const _portKey = 'port';
   static const _avatarKey = 'avatar';
+  static const _keepRunningKey = 'keep_running';
 
   final PreferenceStore _prefs;
 
@@ -63,6 +64,9 @@ class Settings {
 
   /// Notre photo de profil (JPEG) ; vide si aucune.
   Uint8List avatar;
+
+  /// Rester joignable application fermée (service au premier plan) ; activé par défaut.
+  bool keepRunning;
 
   static Future<Settings> load(PreferenceStore prefs) async {
     var userId = await prefs.getString(_userIdKey);
@@ -77,6 +81,7 @@ class Settings {
       await prefs.getString(_nameKey),
       port != null && port > 0 && port < 65536 ? port : defaultPort,
       _decodeAvatar(await prefs.getString(_avatarKey)),
+      await prefs.getInt(_keepRunningKey) != 0,
     );
   }
 
@@ -84,6 +89,7 @@ class Settings {
     final value = name;
     if (value != null) await _prefs.setString(_nameKey, value);
     await _prefs.setInt(_portKey, port);
+    await _prefs.setInt(_keepRunningKey, keepRunning ? 1 : 0);
     if (avatar.isEmpty) {
       await _prefs.remove(_avatarKey);
     } else {

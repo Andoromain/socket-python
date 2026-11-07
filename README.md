@@ -125,16 +125,34 @@ Une offre de fichier venant d'un PC s'affiche et peut être refusée.
 
 <p align="center"><img src="docs/appel-android.png" alt="Android : appel entrant, appel en cours, appels dans la conversation" width="720"></p>
 
-Pas encore (version suivante) : réception et envoi de fichiers et de photos,
-notifications quand l'application est fermée.
+**Joignable application fermée** (à partir de la 3.7) : Socket Chat reste actif en
+arrière-plan, même après un redémarrage du téléphone. Une notification discrète et
+permanente l'indique (Android l'exige). Les nouveaux messages et les appels manqués
+arrivent en notification, un par conversation ; un toucher ouvre la conversation. Un
+appel entrant fait sonner et vibrer le téléphone selon son mode (normal, vibreur,
+silencieux) et s'affiche en plein écran, même verrouillé, avec **Répondre** et
+**Refuser**. Réglage : Préférences › **Rester joignable** (activé par défaut).
+
+Au premier lancement de la 3.7, Android demande d'autoriser les **notifications** :
+accepter. Les Préférences signalent ensuite ce qui manque encore, avec un bouton vers le
+bon réglage d'Android :
+
+- **Appels sur l'écran verrouillé** (Android 14 et plus) : autoriser Socket Chat à
+  afficher les appels en plein écran ;
+- **Optimisation de la batterie** : certains fabricants (Xiaomi, Huawei, Samsung,
+  Oppo…) arrêtent les applications en arrière-plan ; exclure Socket Chat de
+  l'optimisation. La consommation reste très faible : l'application attend simplement
+  sur le réseau.
+
+Pas encore : réception et envoi de fichiers et de photos.
 
 Limites à connaître :
 
-- Pour l'instant, l'application ne reçoit les messages **et les appels** que lorsqu'elle
-  est ouverte (au premier plan ou récemment utilisée). Les messages envoyés pendant ce
-  temps attendent sur le poste de l'expéditeur et arrivent à la réouverture ; un appel
-  aboutit à « Pas de réponse ». La prochaine version fera sonner le téléphone même
-  application fermée.
+- « Rester joignable » désactivé, l'application ne reçoit messages et appels que
+  lorsqu'elle est ouverte : les messages attendent sur le poste de l'expéditeur, un
+  appel aboutit à « Pas de réponse ».
+- Hors du réseau de l'entreprise, Socket Chat reste actif mais ne joint personne ; il
+  retrouve les collègues au retour sur le Wi-Fi.
 - Certains réseaux Wi-Fi d'entreprise **isolent les appareils entre eux** (« isolation
   des clients ») : ni la détection ni les connexions ne passent alors. Ce réglage relève
   du service informatique.
@@ -352,9 +370,12 @@ mobile/lib/
 ├── store/        historique SQLite (store.py), même schéma
 ├── net/          connexion, messagerie, fichiers, détection, appels (network.py, calls.py…)
 ├── calls/        média des appels (flutter_webrtc)
-├── app/          préférences, contrôleur, canaux Android (multicast Wi-Fi, sonnerie)
+├── app/          préférences, contrôleur, canaux Android (multicast Wi-Fi, sonnerie,
+│                 service et notifications)
 └── ui/           écrans Material 3
 mobile/tool/peer.dart   pair en ligne de commande pour le test d'interopérabilité
+mobile/android/app/src/main/kotlin/   côté Android : application (moteur Flutter
+                         démarré avec le processus), service au premier plan, notifications
 ```
 
 Avec [Flutter](https://docs.flutter.dev/get-started/install) (version de la CI) :

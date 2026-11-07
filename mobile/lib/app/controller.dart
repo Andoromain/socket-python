@@ -11,6 +11,7 @@ import '../net/messenger.dart';
 import '../protocol/protocol.dart';
 import '../store/store.dart';
 import '../updates/app_updater.dart';
+import 'background.dart';
 import 'call_platform.dart';
 import 'platform.dart';
 import 'settings.dart';
@@ -29,7 +30,9 @@ class ChatController extends ChangeNotifier {
     this.updater,
     this.callPlatform = const CallPlatform(),
     EngineFactory? engineFactory,
-  }) : messenger = Messenger(store, settings.userId, settings.name ?? 'Android', avatar: settings.avatar) {
+    BackgroundPlatform? background,
+  }) : messenger = Messenger(store, settings.userId, settings.name ?? 'Android', avatar: settings.avatar),
+       background = background ?? BackgroundPlatform() {
     calls = CallManager(messenger, engineFactory ?? WebRtcEngine.new);
     calls.stateChanged.connect(_onCallState);
     calls.error.connect(errors.emit);
@@ -60,6 +63,15 @@ class ChatController extends ChangeNotifier {
   bool _ringing = false;
   bool _proximity = false;
 
+  /// Service au premier plan et notifications (application fermée).
+  final BackgroundPlatform background;
+  bool _callNotified = false;
+  bool _inCall = false;
+  bool _callMode = false;
+
+  /// Conversation à ouvrir (toucher d'une notification de message).
+  final Signal<String> conversationRequested = Signal();
+
   /// Mise à jour de l'application ; `null` hors Android (tests).
   final AppUpdater? updater;
   Timer? _firstUpdateCheck;
@@ -81,6 +93,9 @@ class ChatController extends ChangeNotifier {
   bool _disposed = false;
 
   bool get needsName => settings.name == null;
+
+  /// L'écran de l'application est affiché (sinon : notifications).
+  bool get visible => _visible;
   bool get running => messenger.running;
 
   // -- Cycle de vie ----------------------------------------------------
@@ -102,6 +117,7 @@ class ChatController extends ChangeNotifier {
       notifyListeners();
       return;
     }
+    await _applyKeepRunning();
     if (useDiscovery) {
       await platform.acquireMulticastLock();
       final discovery = Discovery(
@@ -141,6 +157,19 @@ class ChatController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Rester joignable application fermée (service au premier plan et notifications).
+  Future<void> setKeepRunning(bool on) async {
+    settings.keepRunning = on;
+    await settings.save();
+    if (messenger.running) await _applyKeepRunning();
+    notifyListeners();
+  }
+
+  Future<void> _applyKeepRunning() async {
+    await background.setKeepRunning(settings.keepRunning);
+    if (settings.keepRunning) await background.requestNotificationPermission();
+  }
+
   /// Change (ou retire avec une liste vide) notre photo de profil et l'envoie aux contacts.
   Future<void> setAvatar(Uint8List data) async {
     messenger.setAvatar(data);
@@ -152,6 +181,8 @@ class ChatController extends ChangeNotifier {
   /// L'application passe au premier plan ou en arrière-plan.
   void setVisible(bool visible) {
     _visible = visible;
+    // Écran quitté pendant que ça sonne : la notification d'appel prend le relais.
+    if (!visible && calls.call?.state == CallState.incoming) _onCallState(calls.call);
     if (visible) {
       _markOpenRead();
       _discovery?.announce();
@@ -203,6 +234,22 @@ class ChatController extends ChangeNotifier {
 
   void _onCallState(Call? call) {
     final ringing = call?.state == CallState.incoming;
+    if (ringing && !_visible && !_callNotified) {
+      _callNotified = true;
+      background.showIncomingCall(call!.id, call.contactId, store.contact(call.contactId)?.name ?? '');
+    } else if (!ringing && _callNotified) {
+      _callNotified = false;
+      background.cancelIncomingCall();
+    }
+    final inCall = call != null && (call.state == CallState.connecting || call.state == CallState.active);
+    if (inCall != _inCall) {
+      _inCall = inCall;
+      background.setInCall(inCall);
+    }
+    if ((call != null) != _callMode) {
+      _callMode = call != null;
+      background.setCallMode(_callMode);
+    }
     if (ringing != _ringing) {
       _ringing = ringing;
       ringing ? callPlatform.startRinging() : callPlatform.stopRinging();
@@ -214,6 +261,18 @@ class ChatController extends ChangeNotifier {
       callPlatform.setProximity(proximity);
     }
     _changed();
+  }
+
+  /// Action venue d'une notification Android.
+  void handleAction(BackgroundAction action) {
+    switch (action) {
+      case OpenConversation(:final contactId):
+        if (store.contact(contactId) != null) conversationRequested.emit(contactId);
+      case AnswerCall(:final callId):
+        if (calls.call?.id == callId) calls.accept();
+      case DeclineCall(:final callId):
+        if (calls.call?.id == callId) calls.decline();
+    }
   }
 
   void deleteContact(String contactId) {
@@ -240,13 +299,25 @@ class ChatController extends ChangeNotifier {
     if (!record.outgoing && record.contactId == _openContact && _visible) {
       // Affiché à l'écran : lu immédiatement (après la fin du traitement en cours).
       scheduleMicrotask(_markOpenRead);
+    } else if (record.unread && !_visible) {
+      _notifyMessages(record.contactId); // message ou appel manqué, application fermée
     }
     _changed();
   }
 
+  /// Notification des messages non lus d'une conversation (les derniers, sur une ligne chacun).
+  void _notifyMessages(String contactId) {
+    final unread = store.messages(contactId).where((m) => m.unread).toList();
+    if (unread.isEmpty) return;
+    final lines = [for (final m in unread.skip(unread.length > 6 ? unread.length - 6 : 0)) m.preview];
+    background.notifyMessages(contactId, store.contact(contactId)?.name ?? 'Socket Chat', lines, unread.length);
+  }
+
   void _markOpenRead() {
     final contactId = _openContact;
-    if (contactId != null && _visible) messenger.markRead(contactId);
+    if (contactId == null || !_visible) return;
+    messenger.markRead(contactId);
+    background.cancelMessages(contactId);
   }
 
   /// Regroupe les notifications d'une même rafale d'événements réseau.

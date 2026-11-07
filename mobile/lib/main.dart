@@ -25,6 +25,9 @@ Future<void> main() async {
     downloadDirectory: () async => Directory('${(await getTemporaryDirectory()).path}/updates'),
   );
   final controller = ChatController(store, settings, updater: updater);
+  // Le moteur démarre avec le processus, souvent sans écran (application fermée, démarrage
+  // du téléphone) : rien n'est « vu » tant qu'Android n'a pas affiché l'écran.
+  controller.setVisible(false);
   runApp(SocketChatApp(controller: controller));
   await controller.start();
 }

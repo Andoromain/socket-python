@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../app/avatar.dart';
+import '../app/background.dart';
 import '../app/controller.dart';
 import '../updates/app_updater.dart';
 import '../protocol/protocol.dart';
@@ -36,12 +37,86 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController _port = TextEditingController(text: '${widget.controller.settings.port}');
   late final Future<List<String>> _addresses = widget.controller.localAddresses();
   bool _saving = false;
+  BackgroundStatus? _status;
+  late final AppLifecycleListener _lifecycle;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshStatus();
+    // Retour des réglages d'Android : l'autorisation vient peut-être d'être accordée.
+    _lifecycle = AppLifecycleListener(onResume: _refreshStatus);
+  }
 
   @override
   void dispose() {
+    _lifecycle.dispose();
     _name.dispose();
     _port.dispose();
     super.dispose();
+  }
+
+  Future<void> _refreshStatus() async {
+    final status = await widget.controller.background.status();
+    if (mounted) setState(() => _status = status);
+  }
+
+  Future<void> _setKeepRunning(bool on) async {
+    await widget.controller.setKeepRunning(on);
+    await _refreshStatus();
+  }
+
+  /// Joignable application fermée : interrupteur et autorisations encore manquantes.
+  List<Widget> _backgroundSection(ThemeData theme) {
+    final controller = widget.controller;
+    final background = controller.background;
+    final status = _status;
+    final on = controller.settings.keepRunning;
+    return [
+      Text('Application fermée', style: theme.textTheme.titleSmall?.copyWith(color: theme.colorScheme.primary)),
+      SwitchListTile(
+        key: const ValueKey('keep-running'),
+        contentPadding: EdgeInsets.zero,
+        secondary: const Icon(Icons.notifications_active_outlined),
+        title: const Text('Rester joignable'),
+        subtitle: const Text(
+          'Recevoir messages et appels même application fermée. Une notification discrète '
+          'indique que Socket Chat reste actif.',
+        ),
+        value: on,
+        onChanged: _setKeepRunning,
+      ),
+      if (on && status != null && !status.notifications)
+        _Permission(
+          key: const ValueKey('allow-notifications'),
+          icon: Icons.notifications_off_outlined,
+          title: 'Notifications désactivées',
+          text: 'Sans elles, vous ne verrez ni les nouveaux messages ni les appels.',
+          action: 'Autoriser',
+          onPressed: background.openNotificationSettings,
+        ),
+      if (on && status != null && !status.fullScreen)
+        _Permission(
+          key: const ValueKey('allow-full-screen'),
+          icon: Icons.phone_locked_outlined,
+          title: "Appels sur l'écran verrouillé",
+          text: 'Autorisez Socket Chat à afficher les appels en plein écran pour les voir téléphone verrouillé.',
+          action: 'Autoriser',
+          onPressed: background.openFullScreenSettings,
+        ),
+      if (on && status != null && !status.battery)
+        _Permission(
+          key: const ValueKey('allow-battery'),
+          icon: Icons.battery_alert_outlined,
+          title: 'Optimisation de la batterie',
+          text:
+              'Certains téléphones arrêtent les applications en arrière-plan : excluez Socket Chat '
+              "de l'optimisation pour rester joignable (consommation très faible).",
+          action: 'Ne pas restreindre',
+          onPressed: background.requestBatteryUnrestricted,
+        ),
+      const SizedBox(height: 16),
+    ];
   }
 
   Future<void> _save() async {
@@ -194,6 +269,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 24),
             FilledButton(onPressed: _saving ? null : _save, child: Text(_saving ? 'Enregistrement…' : 'Enregistrer')),
             const SizedBox(height: 32),
+            ..._backgroundSection(theme),
             Text('Cet appareil', style: theme.textTheme.titleSmall?.copyWith(color: theme.colorScheme.primary)),
             FutureBuilder<List<String>>(
               future: _addresses,
@@ -245,6 +321,62 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
               ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Autorisation manquante : explication et bouton vers le réglage d'Android.
+class _Permission extends StatelessWidget {
+  const _Permission({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.text,
+    required this.action,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String title;
+  final String text;
+  final String action;
+  final Future<void> Function() onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      elevation: 0,
+      color: scheme.errorContainer,
+      margin: const EdgeInsets.only(bottom: 8),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, color: scheme.onErrorContainer),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(color: scheme.onErrorContainer),
+                  ),
+                ),
+              ],
+            ),
+            Padding(
+              padding: const EdgeInsets.only(left: 36, top: 4, right: 8),
+              child: Text(text, style: TextStyle(color: scheme.onErrorContainer)),
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(onPressed: onPressed, child: Text(action)),
+            ),
           ],
         ),
       ),
