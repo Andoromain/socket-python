@@ -401,3 +401,7 @@ Pour construire localement sur la plate-forme courante : `pip install ".[build]"
 `python scripts/build.py` (sous Windows, l'installeur n'est produit que si
 [Inno Setup 6](https://jrsoftware.org/isinfo.php) est installé ; sinon seul le dossier
 `dist/socket-chat` est créé).
+
+## Licence
+
+Socket Chat est distribué sous [licence MIT](LICENSE).
