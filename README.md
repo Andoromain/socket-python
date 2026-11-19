@@ -73,7 +73,7 @@ L'archive est construite sur Ubuntu 22.04 et fonctionne sur les distributions
 Si Python est déjà disponible sur le poste :
 
 ```bash
-pipx install git+https://github.com/andoajpr2/socket-python.git
+pipx install git+https://github.com/Andoromain/socket-python.git
 ```
 
 ou, sans pipx, `pip install --user <url ou chemin du dépôt>`. Cela fournit la commande
@@ -84,8 +84,7 @@ ou, sans pipx, `pip install --user <url ou chemin du dépôt>`. Cela fournit la 
 L'application Android parle le même protocole que les postes : pas de serveur, le
 téléphone doit simplement être sur **le même réseau** (le Wi-Fi de l'entreprise).
 
-1. Sur le téléphone, ouvrir la page **Releases** (dépôt public des installeurs, ou ce
-   dépôt) et télécharger `socket-chat-X.Y.Z-android.apk` de la dernière version.
+1. Sur le téléphone, ouvrir la page **Releases** de ce dépôt et télécharger `socket-chat-X.Y.Z-android.apk` de la dernière version.
 2. L'ouvrir. Android demande d'autoriser l'installation depuis cette source
    (navigateur ou gestionnaire de fichiers) : c'est normal pour une application hors
    Play Store.
@@ -133,7 +132,7 @@ il suffit d'**installer la nouvelle version par-dessus l'ancienne**, sans désin
 |---|---|
 | Windows (installeur) | Lancer le nouveau `socket-chat-<version>-windows-setup.exe` (même mode : utilisateur ou tous les utilisateurs). Si Socket Chat est ouvert, même caché dans la zone de notification, l'installeur le ferme lui-même. |
 | Linux (archive) | Extraire la nouvelle archive et relancer son `install.sh` : l'instance ouverte est arrêtée, puis remplacée. |
-| pipx | `pipx install --force git+https://github.com/andoajpr2/socket-python.git` (quitter Socket Chat avant). |
+| pipx | `pipx install --force git+https://github.com/Andoromain/socket-python.git` (quitter Socket Chat avant). |
 
 Le nom, le port, l'identifiant et l'**historique des conversations sont conservés** :
 ils sont stockés dans le profil de l'utilisateur, pas avec le programme. L'historique est
@@ -143,23 +142,14 @@ converti automatiquement si le format change.
 > [journal des modifications](CHANGELOG.md), par exemple 3.0 → 3.1), **tous les postes
 > doivent être mis à jour** : les versions différentes ne communiquent pas entre elles.
 
-### Mise à jour automatique : mise en place (une seule fois)
+### Mise à jour automatique
 
-Le code est dans un dépôt **privé**, que les postes ne peuvent pas lire. Les installeurs
-sont donc publiés dans un **second dépôt public** qui ne contient qu'eux :
-
-1. Créer le dépôt **public** `andoajpr2/socket-chat-releases` (vide, avec un README).
-2. Créer un jeton GitHub *fine-grained* (Settings › Developer settings › Personal access
-   tokens) limité à ce dépôt, avec la permission **Contents : Read and write**.
-3. Dans ce dépôt-ci, Settings › Secrets and variables › Actions : ajouter ce jeton sous
-   le nom **`RELEASES_TOKEN`**.
-
-À chaque tag `vX.Y.Z`, le workflow **Release** publie alors aussi les installeurs et le
-manifeste `latest.json` dans le dépôt public. Sans le secret, la publication publique est
-simplement ignorée (avertissement dans le workflow).
+À chaque tag `vX.Y.Z`, le workflow **Release** publie les installeurs, l'APK et le
+manifeste `latest.json` dans les **Releases de ce dépôt** (public). Aucun réglage n'est
+nécessaire.
 
 Les postes lisent
-`https://github.com/andoajpr2/socket-chat-releases/releases/latest/download/latest.json`
+`https://github.com/Andoromain/socket-python/releases/latest/download/latest.json`
 (Internet nécessaire ; le proxy système est utilisé).
 
 **Pour l'administrateur** : ces réglages se placent dans les préférences de l'utilisateur
@@ -241,7 +231,7 @@ Conçu pour un **réseau interne de confiance** :
 - Mise à jour automatique : uniquement en HTTPS (ou depuis un dossier), version
   strictement plus récente, taille et empreinte SHA-256 vérifiées avant toute exécution.
   La confiance repose sur le compte GitHub qui publie : protégez-le (double
-  authentification) et limitez le jeton `RELEASES_TOKEN` au seul dépôt public.
+  authentification).
 - Les données reçues sont validées : taille limitée (10 000 caractères par message,
   64 Kio par trame), JSON strict, texte affiché sans interprétation HTML. Toute donnée
   invalide coupe la connexion.
@@ -389,10 +379,9 @@ L'ordre compte : **le numéro de version change dans le code avant le tag**.
    ```
    Le workflow **Release** vérifie d'abord que le tag correspond à la version du code
    (sinon il s'arrête aussitôt avec la marche à suivre), construit l'installeur Windows,
-   l'archive Linux et l'APK Android signé, puis les publie dans ce dépôt et dans le dépôt
-   public.
+   l'archive Linux et l'APK Android signé, puis les publie dans les Releases de ce dépôt.
 
-Si la publication échoue (dépôt public, jeton…), **ne créez pas de nouveau tag** :
+Si la publication échoue (clé Android…), **ne créez pas de nouveau tag** :
 corrigez la cause puis, dans **Actions**, ouvrez l'exécution du tag et cliquez sur
 **Re-run failed jobs**. Un tag créé par erreur se supprime avec
 `git push origin --delete vX.Y.Z` puis `git tag -d vX.Y.Z`.

@@ -1,7 +1,7 @@
 """Mise à jour automatique.
 
-Les installeurs sont publiés avec un fichier ``latest.json`` dans un dépôt GitHub
-public dédié (le code reste privé). L'application lit ce manifeste, compare la
+Les installeurs sont publiés avec un fichier ``latest.json`` dans les Releases du
+dépôt GitHub public du projet. L'application lit ce manifeste, compare la
 version, télécharge le fichier de sa plate-forme, vérifie taille et SHA-256, puis
 lance l'installation silencieuse qui la relance ensuite.
 
@@ -36,7 +36,7 @@ from .protocol import safe_file_name
 
 log = logging.getLogger(__name__)
 
-RELEASES_REPO = "andoajpr2/socket-chat-releases"
+RELEASES_REPO = "Andoromain/socket-python"
 DOWNLOAD_PREFIX = "socket-chat-maj-"
 DEFAULT_UPDATE_URL = f"https://github.com/{RELEASES_REPO}/releases/latest/download/latest.json"
 

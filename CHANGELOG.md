@@ -1,5 +1,19 @@
 # Journal des modifications
 
+## 3.3.2
+
+Compatible avec la 3.3 (même protocole).
+
+### Modifié
+- La mise à jour automatique lit désormais les Releases du dépôt du projet
+  (`Andoromain/socket-python`), devenu public : le dépôt séparé des installeurs et le
+  jeton `RELEASES_TOKEN` ne sont plus nécessaires.
+- Le code est distribué sous licence MIT.
+
+### À savoir
+- Les postes en 3.3.1 ou avant cherchent encore les mises à jour dans l'ancien dépôt :
+  installez une fois la 3.3.2 à la main, les suivantes arriveront automatiquement.
+
 ## 3.3.1
 
 Compatible avec la 3.3 (même protocole) : rien ne change sur les postes Windows et Linux.
