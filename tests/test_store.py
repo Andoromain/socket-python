@@ -184,3 +184,27 @@ def test_migration_from_schema_1(tmp_path):
     assert store.set_reaction("m1", ME, "👍")
     store.add_message(file_msg(2))
     assert store._db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+
+
+def test_migration_from_schema_1_adds_key_columns(tmp_path):
+    test_migration_from_schema_1(tmp_path)
+    store = Store(tmp_path / "old.sqlite3")
+    contact = store.contact(A)
+    assert contact.public_key is None and contact.pending_key is None
+
+
+def test_key_pinning():
+    store = Store()
+    store.upsert_contact(A, "Alice")
+    store.pin_key(A, "clé1")
+    assert store.contact(A).public_key == "clé1"
+    assert store.set_pending_key(A, "clé2")
+    assert not store.set_pending_key(A, "clé2")  # inchangée
+    assert store.contact(A).pending_key == "clé2"
+    store.upsert_contact(A, "Alice Martin")  # le reste du contact ne touche pas aux clés
+    assert store.contact(A).public_key == "clé1"
+    store.pin_key(A, "clé2")
+    contact = store.contact(A)
+    assert contact.public_key == "clé2" and contact.pending_key is None
+    assert not store.set_pending_key(A, None)
+    assert [s.contact.public_key for s in store.contacts()] == ["clé2"]

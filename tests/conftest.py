@@ -29,8 +29,8 @@ def make_messenger(qtbot):
 
     created = []
 
-    def factory(name, *, user_id=None, store=None, start=True):
-        messenger = Messenger(store or Store(), user_id or new_id(), name)
+    def factory(name, *, user_id=None, store=None, start=True, identity=None):
+        messenger = Messenger(store or Store(), user_id or new_id(), name, identity)
         created.append(messenger)
         if start:
             assert messenger.start(0)

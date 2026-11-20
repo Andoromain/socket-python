@@ -8,7 +8,7 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "bmp", "webp"}
 
@@ -46,6 +46,12 @@ _MIGRATIONS = {
         emoji      TEXT NOT NULL,
         PRIMARY KEY (message_id, author)
     );
+    """,
+    # Protocole 4 : clé publique (Noise) de chaque contact, épinglée au premier contact
+    # chiffré, et nouvelle clé présentée en attendant que l'utilisateur l'accepte.
+    3: """
+    ALTER TABLE contacts ADD COLUMN public_key TEXT;
+    ALTER TABLE contacts ADD COLUMN pending_key TEXT;
     """,
 }
 
@@ -114,6 +120,10 @@ class Contact:
     host: str | None = None
     port: int | None = None
     last_seen: int = 0
+    #: Clé publique X25519 épinglée (base64) ; ``None`` tant qu'aucune connexion chiffrée.
+    public_key: str | None = None
+    #: Clé différente présentée par ce contact, refusée en attendant l'utilisateur.
+    pending_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -204,6 +214,23 @@ class Store:
                 """,
                 {"id": contact_id, "name": name, "host": host, "port": port, "seen": last_seen},
             )
+
+    def pin_key(self, contact_id: str, public_key: str) -> None:
+        """Épingle la clé du contact (et oublie toute clé en attente)."""
+        with self._db:
+            self._db.execute(
+                "UPDATE contacts SET public_key = ?, pending_key = NULL WHERE id = ?",
+                (public_key, contact_id),
+            )
+
+    def set_pending_key(self, contact_id: str, public_key: str | None) -> bool:
+        """Mémorise (ou efface) la nouvelle clé refusée ; vrai si elle a changé."""
+        with self._db:
+            cursor = self._db.execute(
+                "UPDATE contacts SET pending_key = ? WHERE id = ? AND pending_key IS NOT ?",
+                (public_key, contact_id, public_key),
+            )
+        return cursor.rowcount > 0
 
     def contact(self, contact_id: str) -> Contact | None:
         row = self._db.execute("SELECT * FROM contacts WHERE id = ?", (contact_id,)).fetchone()
@@ -403,7 +430,15 @@ class Store:
 
 
 def _contact(row: sqlite3.Row) -> Contact:
-    return Contact(row["id"], row["name"], row["host"], row["port"], row["last_seen"])
+    return Contact(
+        row["id"],
+        row["name"],
+        row["host"],
+        row["port"],
+        row["last_seen"],
+        row["public_key"],
+        row["pending_key"],
+    )
 
 
 def _file(row: sqlite3.Row, prefix: str = "") -> FileInfo | None:

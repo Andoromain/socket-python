@@ -10,7 +10,7 @@ from importlib.resources import files
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from . import __version__
+from . import __version__, identity
 
 ORGANIZATION = "SocketChat"
 APPLICATION = "SocketChat"
@@ -111,7 +111,8 @@ def main(argv: list[str] | None = None) -> int:
 
     settings = Settings()
     store = Store(data_dir / "history.sqlite3")
-    messenger = Messenger(store, settings.user_id, settings.name)
+    keys = identity.load_or_create(data_dir / "identity.key")
+    messenger = Messenger(store, settings.user_id, settings.name, keys)
     allowed_networks = settings.allowed_networks
     if allowed_networks:
         log.info("Réseaux autorisés : %s", ", ".join(map(str, allowed_networks)))

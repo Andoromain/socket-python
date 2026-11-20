@@ -148,7 +148,7 @@ def test_interrupted_transfer_can_be_retried(qtbot, make_messenger, tmp_path, mo
     assert state(bob, record.id) is FileState.FAILED
     wait_state(qtbot, alice, record.id, FileState.FAILED)
 
-    bob2 = make_messenger("Bob", user_id=bob_id, store=bob_store)
+    bob2 = make_messenger("Bob", user_id=bob_id, store=bob_store, identity=bob.identity)
     with qtbot.waitSignal(bob2.presence_changed, timeout=TIMEOUT):
         alice.on_peer_seen(bob_id, "Bob", "127.0.0.1", bob2.port)
         alice.connect_to(bob_id)

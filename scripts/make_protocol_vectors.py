@@ -4,7 +4,8 @@ Usage : python scripts/make_protocol_vectors.py
 
 Écrit ``mobile/test/fixtures/protocol_vectors.json`` à partir de
 ``src/socket_chat/protocol.py`` : trames valides (encodage exact et champs attendus),
-trames invalides à rejeter, annonces UDP, noms d'utilisateur et de fichiers.
+trames invalides à rejeter, annonces UDP, noms d'utilisateur et de fichiers, codes de
+sécurité. (Noise lui-même est vérifié avec le vecteur officiel noise_xx_vector.json.)
 Les tests Python et Dart lisent le même fichier ; un test Python vérifie qu'il est à jour.
 """
 
@@ -18,6 +19,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from socket_chat.identity import PROLOGUE, safety_number  # noqa: E402
 from socket_chat.protocol import (  # noqa: E402
     CHUNK_SIZE,
     MAX_TEXT_LENGTH,
@@ -219,7 +221,19 @@ def build() -> dict[str, object]:
         "file_names": [[raw, safe_file_name(raw)] for raw in FILE_NAMES],
         "announce_valid": announces,
         "announce_invalid": [_b64(d) for d in ANNOUNCE_INVALID],
+        "prologue": _b64(PROLOGUE),
+        "safety_numbers": [
+            {"a": _b64(a), "b": _b64(b), "number": safety_number(a, b)}
+            for a, b in SAFETY_KEYS
+        ],
     }
+
+
+SAFETY_KEYS = [
+    (bytes(range(32)), bytes(range(32, 64))),
+    (bytes(range(32, 64)), bytes(range(32))),  # même code dans l'autre sens
+    (b"\xff" * 32, b"\x00" * 31 + b"\x01"),
+]
 
 
 def render() -> str:
