@@ -143,6 +143,8 @@ class Messenger {
     if (contact == null || pending == null) return;
     store.pinKey(contactId, pending);
     keyChanged.emit(contactId);
+    // Une tentative en cours (vers une adresse obsolète) empêcherait de reconnecter.
+    _dialing.remove(contactId)?.abort('Nouvelle clé acceptée');
     connectTo(contactId);
   }
 

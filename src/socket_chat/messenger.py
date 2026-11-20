@@ -346,6 +346,11 @@ class Messenger(QObject):
         self.store.pin_key(contact_id, contact.pending_key)
         log.info("Nouvelle clé de %s acceptée", contact.name)
         self.key_changed.emit(contact_id)
+        # Une tentative en cours (vers une adresse obsolète, qui peut traîner plusieurs
+        # secondes sous Windows) empêcherait de reconnecter tout de suite.
+        stale = self._dialing.pop(contact_id, None)
+        if stale is not None:
+            stale.abort("Nouvelle clé acceptée")
         self.connect_to(contact_id)
 
     def contact_key(self, contact_id: str) -> bytes | None:

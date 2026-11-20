@@ -347,3 +347,25 @@ def test_traffic_is_encrypted_on_the_wire(qtbot, make_messenger, monkeypatch):
     assert wire
     for clear in (b"Mot de passe", b"Alice", b"hello", alice.user_id.encode()):
         assert clear not in wire
+
+
+def test_accepting_new_key_replaces_stale_connection_attempt(qtbot, make_messenger):
+    """Régression (Windows) : une tentative qui traîne ne doit pas retarder la reconnexion."""
+    from socket_chat.identity import encode_key
+    from socket_chat.noise import KeyPair
+
+    black_hole = QTcpServer()
+    assert black_hole.listen(QHostAddress(QHostAddress.SpecialAddress.LocalHost), 0)
+    alice, bob = make_messenger("Alice"), make_messenger("Bob")
+    alice.store.upsert_contact(bob.user_id, "Bob", host="127.0.0.1", port=black_hole.serverPort())
+    alice.store.pin_key(bob.user_id, encode_key(KeyPair.generate().public))  # ancienne clé
+    alice.store.set_pending_key(bob.user_id, encode_key(bob.identity.public))
+    record = alice.send(bob.user_id, "Tu es là ?")  # tentative vers l'ancienne adresse
+    assert bob.user_id in alice._dialing
+
+    alice.store.upsert_contact(bob.user_id, "Bob", host="127.0.0.1", port=bob.port)
+    with qtbot.waitSignal(bob.message_added, timeout=2000) as blocker:
+        alice.trust_new_key(bob.user_id)
+    assert blocker.args[0].id == record.id
+    black_hole.close()
+    black_hole.deleteLater()

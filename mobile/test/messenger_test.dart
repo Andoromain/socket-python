@@ -380,6 +380,31 @@ void main() {
       expect(alice.store.contact(bobId)!.pendingKey, isNull);
     });
 
+    test('accepter une clé remplace une tentative qui traîne', () async {
+      // Un serveur qui accepte sans jamais répondre simule une tentative qui traîne.
+      final blackHole = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      final held = <Socket>[];
+      blackHole.listen(held.add);
+      addTearDown(() async {
+        for (final s in held) {
+          s.destroy();
+        }
+        await blackHole.close();
+      });
+      final alice = await messengers.make('Alice');
+      final bob = await messengers.make('Bob');
+      alice.store.upsertContact(bob.userId, 'Bob', host: '127.0.0.1', port: blackHole.port);
+      alice.store.pinKey(bob.userId, encodeKey(noise.KeyPair.generate().public)); // ancienne clé
+      alice.store.setPendingKey(bob.userId, encodeKey(bob.identity.public));
+      final record = alice.send(bob.userId, 'Tu es là ?');
+      expect(alice.dialing.containsKey(bob.userId), isTrue);
+
+      alice.store.upsertContact(bob.userId, 'Bob', host: '127.0.0.1', port: bob.port);
+      final added = next(bob.messageAdded, limit: const Duration(seconds: 2));
+      alice.trustNewKey(bob.userId);
+      expect((await added).id, record.id);
+    });
+
     test('une annonce ne renomme pas un contact vérifié', () async {
       final alice = await messengers.make('Alice');
       final bob = await messengers.make('Bob');
