@@ -208,3 +208,88 @@ def test_key_pinning():
     assert contact.public_key == "clé2" and contact.pending_key is None
     assert not store.set_pending_key(A, None)
     assert [s.contact.public_key for s in store.contacts()] == ["clé2"]
+
+
+# -- Chiffrement au repos ------------------------------------------------------------
+KEY = bytes(range(32))
+SECRET = "Code du coffre : 4521"
+
+
+def disk_bytes(directory):
+    """Tout ce que SQLite a écrit sur le disque (base, journal WAL)."""
+    return b"".join(p.read_bytes() for p in directory.iterdir() if p.is_file())
+
+
+def secret_message(i=1):
+    return MessageRecord(f"00000000-0000-4000-8000-{i:012d}", A, True, SECRET, i, Status.PENDING)
+
+
+def test_encrypted_history_roundtrip_and_nothing_in_clear(tmp_path):
+    store = Store(tmp_path / "h.sqlite3", KEY)
+    assert store.encrypted
+    store.upsert_contact(A, "Alice")
+    store.add_message(secret_message())
+    thumb = b"\xff\xd8JPEG-APERCU-SECRET"
+    record = file_msg(2, thumb=thumb)
+    store.add_message(record)
+    store.update_file(record.id, path="/home/alice/Documents/salaires-2026.xlsx")
+    assert store.messages(A)[0].text == SECRET
+    loaded = store.message(record.id).file
+    assert (loaded.name, loaded.thumb) == ("photo.png", thumb)
+    assert loaded.path == "/home/alice/Documents/salaires-2026.xlsx"
+    assert store.contacts()[0].last_message.file.name == "photo.png"
+    store.close()
+
+    raw = disk_bytes(tmp_path)
+    for clear in (SECRET.encode(), b"photo.png", b"salaires-2026", b"JPEG-APERCU-SECRET"):
+        assert clear not in raw
+
+    again = Store(tmp_path / "h.sqlite3", KEY)
+    assert again.message(secret_message().id).text == SECRET
+    again.close()
+
+
+def test_existing_history_is_encrypted_and_compacted(tmp_path):
+    path = tmp_path / "h.sqlite3"
+    plain = Store(path)
+    plain.upsert_contact(A, "Alice")
+    for i in range(1, 40):
+        plain.add_message(secret_message(i))
+    plain.close()
+    assert SECRET.encode() in disk_bytes(tmp_path)
+
+    store = Store(path, KEY)
+    assert [m.text for m in store.messages(A)] == [SECRET] * 39
+    store.close()
+    assert SECRET.encode() not in disk_bytes(tmp_path)  # anciennes pages effacées
+
+
+def test_wrong_or_missing_key_is_refused(tmp_path):
+    import pytest
+
+    from socket_chat.store import HistoryLockedError
+
+    path = tmp_path / "h.sqlite3"
+    Store(path, KEY).close()
+    with pytest.raises(HistoryLockedError):
+        Store(path, bytes(32))
+    with pytest.raises(HistoryLockedError):
+        Store(path)
+
+
+def test_tampered_or_swapped_values_are_unreadable(tmp_path):
+    from socket_chat.store import UNREADABLE
+
+    path = tmp_path / "h.sqlite3"
+    store = Store(path, KEY)
+    store.upsert_contact(A, "Alice")
+    first, second = secret_message(1), msg(2)
+    store.add_message(first)
+    store.add_message(second)
+    db = store._db
+    # Un attaquant recopie le texte chiffré d'un message dans un autre : refusé.
+    stolen = db.execute("SELECT text FROM messages WHERE id = ?", (first.id,)).fetchone()[0]
+    db.execute("UPDATE messages SET text = ? WHERE id = ?", (stolen, second.id))
+    db.commit()
+    assert store.message(second.id).text == UNREADABLE
+    assert store.message(first.id).text == SECRET

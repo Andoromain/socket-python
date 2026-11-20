@@ -1,7 +1,8 @@
 """Identité cryptographique du poste et code de sécurité des contacts.
 
 Chaque installation possède une paire de clés X25519 créée au premier lancement et
-gardée dans ``identity.key`` (profil de l'utilisateur, lisible par lui seul). La clé
+gardée dans ``identity.key`` (profil de l'utilisateur ; protégée par DPAPI sous Windows,
+lisible par l'utilisateur seul sous Linux, voir ``vault``). La clé
 publique est présentée et prouvée à chaque connexion (Noise XX) ; le correspondant
 l'épingle au premier contact et refuse ensuite toute autre clé.
 
@@ -18,10 +19,10 @@ import base64
 import binascii
 import hashlib
 import logging
-import os
 from pathlib import Path
 
-from .noise import DHLEN, KeyPair
+from . import vault
+from .noise import DHLEN, KeyPair, NoiseError
 
 log = logging.getLogger(__name__)
 
@@ -46,26 +47,22 @@ def decode_key(text: str) -> bytes:
 
 
 def load_or_create(path: str | Path) -> KeyPair:
-    """Clé du poste ; créée (droits restreints) si le fichier est absent ou illisible."""
+    """Clé du poste ; créée si le fichier est absent ou illisible.
+
+    Le fichier est protégé par ``vault`` (DPAPI sous Windows, droits 600 sous Linux).
+    """
     path = Path(path)
     try:
-        keys = KeyPair(decode_key(path.read_text(encoding="ascii").strip()))
-    except FileNotFoundError:
-        pass
-    except (OSError, ValueError, UnicodeDecodeError) as exc:
-        # Fichier abîmé : une nouvelle clé sera créée ; les contacts verront « clé
-        # changée » et devront l'accepter.
+        private = vault.read_secret(path)
+        if private is not None:
+            return KeyPair(private)
+    except (vault.SecretUnavailableError, NoiseError) as exc:
+        # Fichier abîmé ou venu d'une autre session : une nouvelle clé est créée ; les
+        # contacts verront « clé changée » et devront l'accepter.
         log.warning("Clé du poste illisible (%s) : nouvelle clé créée", exc)
-        path.replace(path.with_name(path.name + ".abime"))
-    else:
-        return keys
+        vault.set_aside(path, "abime")
     keys = KeyPair.generate()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_name(path.name + ".tmp")
-    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="ascii") as handle:
-        handle.write(encode_key(keys.private) + "\n")
-    os.replace(temp, path)
+    vault.write_secret(path, keys.private)
     log.info("Nouvelle clé de poste créée : %s", fingerprint(keys.public))
     return keys
 

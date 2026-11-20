@@ -51,6 +51,15 @@ class ChatController extends ChangeNotifier {
   /// Erreur de démarrage persistante (port occupé…), affichée en bandeau.
   String? startError;
 
+  /// Information importante à afficher en bandeau jusqu'à ce que l'utilisateur la ferme
+  /// (historique illisible mis de côté…).
+  String? notice;
+
+  void dismissNotice() {
+    notice = null;
+    notifyListeners();
+  }
+
   /// Conversation à l'écran, marquée comme lue au fil de l'eau.
   String? _openContact;
   bool _visible = true;

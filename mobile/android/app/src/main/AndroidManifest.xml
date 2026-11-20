@@ -6,7 +6,11 @@
     <!-- Sans verrou multicast, Android filtre le broadcast reçu (détection impossible). -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
 
+    <!-- Pas de sauvegarde Android (cloud ni transfert) : l'historique et les clés restent
+         sur ce téléphone ; la clé de l'historique ne quitte jamais Android Keystore. -->
     <application
+        android:allowBackup="false"
+        android:fullBackupContent="false"
         android:label="Socket Chat"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">

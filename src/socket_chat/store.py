@@ -1,12 +1,25 @@
-"""Historique local des contacts et des messages (SQLite, sans dépendance Qt)."""
+"""Historique local des contacts et des messages (SQLite, sans dépendance Qt).
+
+Chiffrement au repos : avec une clé (``key``, 32 octets, voir ``vault``), le contenu
+des messages (texte, nom et chemin des fichiers, aperçus d'images) est chiffré par
+ChaCha20-Poly1305 avant d'être écrit. Chaque valeur est liée à son message et à sa
+colonne (données associées) : elle ne peut être ni modifiée ni déplacée sans être
+détectée. Restent lisibles les métadonnées nécessaires au fonctionnement : contacts,
+dates, états, tailles. Un historique existant est chiffré à la première ouverture avec
+une clé, puis compacté (``VACUUM``) pour effacer les anciennes données en clair.
+"""
 
 from __future__ import annotations
 
+import os
 import sqlite3
 import time
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
+
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 
 SCHEMA_VERSION = 3
 
@@ -57,6 +70,43 @@ _MIGRATIONS = {
 
 #: Auteur des réactions de l'utilisateur local (les autres sont des identifiants de contact).
 ME = "me"
+
+#: Préfixe des valeurs chiffrées (BLOB) ; un aperçu JPEG en clair commence par FF D8.
+_SEALED = b"\x00SCE1"
+_CHECK = b"Socket Chat history"
+#: Texte affiché à la place d'une valeur qui ne peut pas être déchiffrée.
+UNREADABLE = "⚠ message illisible"
+
+
+class HistoryLockedError(Exception):
+    """Historique chiffré, mais clé absente ou incorrecte."""
+
+
+class _Cipher:
+    """Chiffre une valeur liée à son emplacement (``aad``) ; ``None`` reste ``None``."""
+
+    def __init__(self, key: bytes) -> None:
+        if len(key) != 32:
+            raise ValueError("Clé d'historique invalide.")
+        self._aead = ChaCha20Poly1305(key)
+
+    def seal(self, value: str | bytes | None, aad: str) -> bytes | None:
+        if value is None:
+            return None
+        data = value.encode("utf-8") if isinstance(value, str) else value
+        nonce = os.urandom(12)
+        return _SEALED + nonce + self._aead.encrypt(nonce, data, aad.encode("utf-8"))
+
+    def open_bytes(self, stored: bytes, aad: str) -> bytes:
+        nonce = stored[len(_SEALED) : len(_SEALED) + 12]
+        try:
+            return self._aead.decrypt(nonce, stored[len(_SEALED) + 12 :], aad.encode("utf-8"))
+        except InvalidTag as exc:
+            raise ValueError("Valeur chiffrée altérée.") from exc
+
+
+def _sealed(value: object) -> bool:
+    return isinstance(value, bytes) and value.startswith(_SEALED)
 
 
 def now_ms() -> int:
@@ -165,13 +215,15 @@ class ContactSummary:
 
 
 class Store:
-    def __init__(self, path: str | Path = ":memory:") -> None:
+    def __init__(self, path: str | Path = ":memory:", key: bytes | None = None) -> None:
         if path != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(str(path))
         self._db.row_factory = sqlite3.Row
         self._db.execute("PRAGMA foreign_keys = ON")
         self._db.execute("PRAGMA journal_mode = WAL")
+        # Contenu supprimé ou remplacé écrasé sur le disque (pas de restes en clair).
+        self._db.execute("PRAGMA secure_delete = ON")
         version = self._db.execute("PRAGMA user_version").fetchone()[0]
         if version > SCHEMA_VERSION:
             raise RuntimeError("Historique créé par une version plus récente de Socket Chat.")
@@ -180,6 +232,12 @@ class Store:
         for target in range(max(version, 1) + 1, SCHEMA_VERSION + 1):
             self._db.executescript(f"BEGIN; {_MIGRATIONS[target]} COMMIT;")
         self._db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        self._cipher: _Cipher | None = None
+        try:
+            self._setup_encryption(key)
+        except Exception:
+            self._db.close()
+            raise
         # Un transfert ne survit pas à l'arrêt de l'application.
         with self._db:
             self._db.execute(
@@ -189,6 +247,102 @@ class Store:
 
     def close(self) -> None:
         self._db.close()
+
+    # -- Chiffrement -------------------------------------------------------------
+    @property
+    def encrypted(self) -> bool:
+        return self._cipher is not None
+
+    def _setup_encryption(self, key: bytes | None) -> None:
+        self._db.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value BLOB)")
+        row = self._db.execute("SELECT value FROM meta WHERE key = 'check'").fetchone()
+        if key is None:
+            if row is not None:
+                raise HistoryLockedError("Historique chiffré : clé absente.")
+            return
+        cipher = _Cipher(key)
+        if row is not None:
+            try:
+                if cipher.open_bytes(row[0], "meta.check") != _CHECK:
+                    raise ValueError
+            except ValueError as exc:
+                raise HistoryLockedError("Historique chiffré avec une autre clé.") from exc
+            self._cipher = cipher
+            return
+        # Première ouverture avec une clé : tout l'historique existant est chiffré.
+        self._cipher = cipher
+        with self._db:
+            rows = self._db.execute(
+                "SELECT id, text, file_name, file_path, thumb FROM messages"
+            ).fetchall()
+            for row in rows:
+                self._db.execute(
+                    "UPDATE messages SET text = ?, file_name = ?, file_path = ?, thumb = ? "
+                    "WHERE id = ?",
+                    (
+                        self._seal(row["text"], "text", row["id"]),
+                        self._seal(row["file_name"], "file_name", row["id"]),
+                        self._seal(row["file_path"], "file_path", row["id"]),
+                        self._seal(row["thumb"], "thumb", row["id"]),
+                        row["id"],
+                    ),
+                )
+            self._db.execute(
+                "INSERT INTO meta VALUES ('check', ?)", (cipher.seal(_CHECK, "meta.check"),)
+            )
+        if rows:
+            # Compacte la base : les pages qui contenaient le texte en clair disparaissent.
+            self._db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            self._db.execute("VACUUM")
+            self._db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+
+    def _seal(self, value: str | bytes | None, column: str, message_id: str):
+        if self._cipher is None or value is None or _sealed(value):
+            return value
+        return self._cipher.seal(value, f"messages.{column}:{message_id}")
+
+    def _open_text(self, value, column: str, message_id: str, default: str | None = None):
+        if not _sealed(value):
+            return value
+        if self._cipher is None:
+            return default if default is not None else UNREADABLE
+        try:
+            return self._cipher.open_bytes(value, f"messages.{column}:{message_id}").decode()
+        except (ValueError, UnicodeDecodeError):
+            return default if default is not None else UNREADABLE
+
+    def _open_bytes(self, value, column: str, message_id: str) -> bytes:
+        if not _sealed(value):
+            return value or b""
+        try:
+            assert self._cipher is not None
+            return self._cipher.open_bytes(value, f"messages.{column}:{message_id}")
+        except (AssertionError, ValueError):
+            return b""
+
+    def _file(self, row: sqlite3.Row, prefix: str = "") -> FileInfo | None:
+        if row[f"{prefix}kind"] != "file":
+            return None
+        message_id = row[f"{prefix}id"]
+        path = row[f"{prefix}file_path"]
+        return FileInfo(
+            self._open_text(row[f"{prefix}file_name"], "file_name", message_id, "fichier"),
+            row[f"{prefix}file_size"],
+            FileState(row[f"{prefix}file_state"]),
+            None if path is None else self._open_text(path, "file_path", message_id, ""),
+            self._open_bytes(row[f"{prefix}thumb"], "thumb", message_id),
+        )
+
+    def _message(self, row: sqlite3.Row) -> MessageRecord:
+        return MessageRecord(
+            row["id"],
+            row["contact_id"],
+            bool(row["outgoing"]),
+            self._open_text(row["text"], "text", row["id"]),
+            row["ts"],
+            Status(row["status"]),
+            self._file(row),
+        )
 
     # -- Contacts --------------------------------------------------------
     def upsert_contact(
@@ -263,10 +417,10 @@ class Store:
                     row["m_id"],
                     row["id"],
                     bool(row["m_outgoing"]),
-                    row["m_text"],
+                    self._open_text(row["m_text"], "text", row["m_id"]),
                     row["m_ts"],
                     Status(row["m_status"]),
-                    _file(row, "m_"),
+                    self._file(row, "m_"),
                 )
             summaries.append(ContactSummary(_contact(row), last, row["unread"]))
         summaries.sort(key=lambda s: (-s.last_activity, s.contact.name.casefold()))
@@ -292,22 +446,22 @@ class Store:
                     record.id,
                     record.contact_id,
                     int(record.outgoing),
-                    record.text,
+                    self._seal(record.text, "text", record.id),
                     record.ts,
                     record.status.value,
                     "file" if f else "text",
-                    f.name if f else None,
+                    self._seal(f.name if f else None, "file_name", record.id),
                     f.size if f else None,
                     f.state.value if f else None,
-                    f.path if f else None,
-                    f.thumb if f and f.thumb else None,
+                    self._seal(f.path if f else None, "file_path", record.id),
+                    self._seal(f.thumb if f and f.thumb else None, "thumb", record.id),
                 ),
             )
         return cursor.rowcount == 1
 
     def message(self, message_id: str) -> MessageRecord | None:
         row = self._db.execute("SELECT * FROM messages WHERE id = ?", (message_id,)).fetchone()
-        return self._with_reactions([_message(row)])[0] if row else None
+        return self._with_reactions([self._message(row)])[0] if row else None
 
     def _with_reactions(self, records: list[MessageRecord]) -> list[MessageRecord]:
         if not records:
@@ -339,7 +493,7 @@ class Store:
             """,
             (contact_id, limit),
         ).fetchall()
-        return self._with_reactions([_message(row) for row in rows])
+        return self._with_reactions([self._message(row) for row in rows])
 
     def update_status(self, message_id: str, status: Status) -> bool:
         """Fait progresser l'état d'un message (jamais de retour en arrière)."""
@@ -362,7 +516,7 @@ class Store:
             """,
             (contact_id,),
         ).fetchall()
-        return [_message(row) for row in rows]
+        return [self._message(row) for row in rows]
 
     def contacts_with_undelivered(self) -> list[str]:
         rows = self._db.execute(
@@ -400,7 +554,7 @@ class Store:
         with self._db:
             self._db.execute(
                 "UPDATE messages SET file_state = ?, file_path = ? WHERE id = ?",
-                (new_state.value, new_path, message_id),
+                (new_state.value, self._seal(new_path, "file_path", message_id), message_id),
             )
         return True
 
@@ -438,28 +592,4 @@ def _contact(row: sqlite3.Row) -> Contact:
         row["last_seen"],
         row["public_key"],
         row["pending_key"],
-    )
-
-
-def _file(row: sqlite3.Row, prefix: str = "") -> FileInfo | None:
-    if row[f"{prefix}kind"] != "file":
-        return None
-    return FileInfo(
-        row[f"{prefix}file_name"],
-        row[f"{prefix}file_size"],
-        FileState(row[f"{prefix}file_state"]),
-        row[f"{prefix}file_path"],
-        row[f"{prefix}thumb"] or b"",
-    )
-
-
-def _message(row: sqlite3.Row) -> MessageRecord:
-    return MessageRecord(
-        row["id"],
-        row["contact_id"],
-        bool(row["outgoing"]),
-        row["text"],
-        row["ts"],
-        Status(row["status"]),
-        _file(row),
     )

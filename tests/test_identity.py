@@ -21,7 +21,7 @@ def test_damaged_key_file_is_replaced(tmp_path):
     path.write_text("abîmé")
     keys = identity.load_or_create(path)
     assert identity.load_or_create(path).public == keys.public
-    assert (tmp_path / "identity.key.abime").read_text() == "abîmé"
+    assert (tmp_path / "identity-abime.key").read_text() == "abîmé"
 
 
 def test_key_encoding():

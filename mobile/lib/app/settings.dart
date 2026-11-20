@@ -1,8 +1,8 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../net/identity.dart';
 import '../net/noise.dart';
 import '../protocol/protocol.dart';
+import 'secrets.dart';
 
 /// Stockage clé-valeur des préférences (shared_preferences sur l'appareil).
 abstract interface class PreferenceStore {
@@ -51,15 +51,15 @@ class Settings {
   /// Identifiant de cet appareil auprès des contacts (ne change jamais).
   final String userId;
 
-  /// Clé X25519 de l'appareil (protocole 4), créée au premier lancement. Les
-  /// préférences sont privées à l'application (inaccessibles aux autres applications).
+  /// Clé X25519 de l'appareil (protocole 4), créée au premier lancement et gardée dans
+  /// le coffre de l'appareil (Android Keystore, voir secrets.dart).
   final KeyPair identity;
 
   /// `null` tant que l'utilisateur n'a pas choisi son nom (premier lancement).
   String? name;
   int port;
 
-  static Future<Settings> load(PreferenceStore prefs) async {
+  static Future<Settings> load(PreferenceStore prefs, [SecretStore? secrets]) async {
     var userId = await prefs.getString(_userIdKey);
     if (!isValidId(userId)) {
       userId = newId();
@@ -69,24 +69,21 @@ class Settings {
     return Settings._(
       prefs,
       userId!,
-      await _loadIdentity(prefs),
+      await _loadIdentity(prefs, secrets ?? MemorySecretStore()),
       await prefs.getString(_nameKey),
       port != null && port > 0 && port < 65536 ? port : defaultPort,
     );
   }
 
-  static Future<KeyPair> _loadIdentity(PreferenceStore prefs) async {
-    final stored = await prefs.getString(_identityKey);
-    if (stored != null) {
-      try {
-        return KeyPair(decodeKey(stored));
-      } on Object {
-        // Clé abîmée : une nouvelle est créée ; les contacts verront « clé changée ».
-      }
+  static Future<KeyPair> _loadIdentity(PreferenceStore prefs, SecretStore secrets) async {
+    // Clé enregistrée en clair dans les préférences par une préversion : déplacée.
+    final legacy = await prefs.getString(_identityKey);
+    if (legacy != null && legacy.isNotEmpty && await secrets.read(_identityKey) == null) {
+      await secrets.write(_identityKey, legacy);
     }
-    final keys = KeyPair.generate();
-    await prefs.setString(_identityKey, encodeKey(keys.private));
-    return keys;
+    if (legacy != null) await prefs.setString(_identityKey, '');
+    final (private, _) = await loadOrCreateSecret(secrets, _identityKey);
+    return KeyPair(private);
   }
 
   Future<void> save() async {

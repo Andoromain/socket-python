@@ -1,9 +1,18 @@
 // Historique local des contacts et des messages (SQLite), transposé de
-// src/socket_chat/store.py : même schéma, mêmes règles.
+// src/socket_chat/store.py : même schéma, mêmes règles, même chiffrement au repos.
+//
+// Avec une clé (32 octets, gardée par Android Keystore : voir app/secrets.dart), le
+// contenu des messages (texte, nom et chemin des fichiers, aperçus) est chiffré par
+// ChaCha20-Poly1305, chaque valeur liée à son message et à sa colonne.
 
+import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:cryptography/cryptography.dart' as c;
+import 'package:cryptography/dart.dart' as cd;
+import 'package:meta/meta.dart';
 import 'package:sqlite3/sqlite3.dart';
 
 const int schemaVersion = 3;
@@ -55,6 +64,61 @@ const Map<int, String> _migrations = {
 
 /// Auteur des réactions de l'utilisateur local (les autres sont des identifiants de contact).
 const String me = 'me';
+
+/// Préfixe des valeurs chiffrées (BLOB) ; un aperçu JPEG en clair commence par FF D8.
+const List<int> _sealedPrefix = [0, 83, 67, 69, 49]; // \0SCE1
+final List<int> _check = utf8.encode('Socket Chat history');
+
+/// Texte affiché à la place d'une valeur qui ne peut pas être déchiffrée.
+const String unreadable = '⚠ message illisible';
+
+/// Historique chiffré, mais clé absente ou incorrecte.
+class HistoryLockedException implements Exception {
+  HistoryLockedException(this.message);
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
+bool _isSealed(Object? value) {
+  if (value is! Uint8List || value.length < _sealedPrefix.length + 12 + 16) return false;
+  for (var i = 0; i < _sealedPrefix.length; i++) {
+    if (value[i] != _sealedPrefix[i]) return false;
+  }
+  return true;
+}
+
+class _Cipher {
+  _Cipher(List<int> key) : _key = c.SecretKeyData(List<int>.of(key)) {
+    if (key.length != 32) throw ArgumentError("Clé d'historique invalide.");
+  }
+
+  static const cd.DartChacha20 _aead = cd.DartChacha20.poly1305Aead();
+  static final Random _random = Random.secure();
+  final c.SecretKeyData _key;
+
+  Uint8List seal(List<int> data, String aad) {
+    final nonce = List<int>.generate(12, (_) => _random.nextInt(256));
+    final box = _aead.encryptSync(data, secretKey: _key, nonce: nonce, aad: utf8.encode(aad));
+    return Uint8List.fromList([..._sealedPrefix, ...nonce, ...box.cipherText, ...box.mac.bytes]);
+  }
+
+  /// Lève [FormatException] si la valeur a été altérée ou déplacée.
+  Uint8List open(Uint8List stored, String aad) {
+    final start = _sealedPrefix.length;
+    final box = c.SecretBox(
+      stored.sublist(start + 12, stored.length - 16),
+      nonce: stored.sublist(start, start + 12),
+      mac: c.Mac(stored.sublist(stored.length - 16)),
+    );
+    try {
+      return Uint8List.fromList(_aead.decryptSync(box, secretKey: _key, aad: utf8.encode(aad)));
+    } on c.SecretBoxAuthenticationError {
+      throw const FormatException('Valeur chiffrée altérée.');
+    }
+  }
+}
 
 int nowMs() => DateTime.now().millisecondsSinceEpoch;
 
@@ -182,8 +246,9 @@ class ContactSummary {
 }
 
 class Store {
-  /// Ouvre (ou crée) l'historique ; sans [path], il reste en mémoire.
-  Store([String? path]) : _db = _open(path) {
+  /// Ouvre (ou crée) l'historique ; sans [path], il reste en mémoire. Avec [key], le
+  /// contenu des messages est chiffré (un historique en clair l'est à l'ouverture).
+  Store([String? path, List<int>? key]) : _db = _open(path) {
     final version = _db.select('PRAGMA user_version').first.columnAt(0) as int;
     if (version > schemaVersion) {
       _db.close();
@@ -195,21 +260,136 @@ class Store {
       _db.execute('BEGIN; ${_migrations[target]} COMMIT;');
     }
     _db.execute('PRAGMA user_version = $schemaVersion');
+    try {
+      _setupEncryption(key);
+    } catch (_) {
+      _db.close();
+      rethrow;
+    }
     // Un transfert ne survit pas à l'arrêt de l'application.
     _db.execute("UPDATE messages SET file_state = 'failed' WHERE file_state IN ('accepted', 'transferring')");
   }
 
   final Database _db;
+  _Cipher? _cipher;
+
+  bool get encrypted => _cipher != null;
 
   static Database _open(String? path) {
     if (path == null) return sqlite3.openInMemory();
     File(path).parent.createSync(recursive: true);
     final db = sqlite3.open(path);
     db.execute('PRAGMA journal_mode = WAL');
+    // Contenu supprimé ou remplacé écrasé sur le disque (pas de restes en clair).
+    db.execute('PRAGMA secure_delete = ON');
     return db;
   }
 
   void close() => _db.close();
+
+  @visibleForTesting
+  void debugExecute(String sql, [List<Object?> parameters = const []]) => _db.execute(sql, parameters);
+
+  // -- Chiffrement -------------------------------------------------------------
+  void _setupEncryption(List<int>? key) {
+    _db.execute('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value BLOB)');
+    final rows = _db.select("SELECT value FROM meta WHERE key = 'check'");
+    if (key == null) {
+      if (rows.isNotEmpty) throw HistoryLockedException('Historique chiffré : clé absente.');
+      return;
+    }
+    final cipher = _Cipher(key);
+    if (rows.isNotEmpty) {
+      final stored = rows.first['value'];
+      try {
+        if (!_isSealed(stored) || utf8.decode(cipher.open(stored as Uint8List, 'meta.check')) != utf8.decode(_check)) {
+          throw const FormatException();
+        }
+      } on FormatException {
+        throw HistoryLockedException('Historique chiffré avec une autre clé.');
+      }
+      _cipher = cipher;
+      return;
+    }
+    // Première ouverture avec une clé : tout l'historique existant est chiffré.
+    _cipher = cipher;
+    final messages = _db.select('SELECT id, text, file_name, file_path, thumb FROM messages');
+    _transaction(() {
+      for (final row in messages) {
+        final id = row['id'] as String;
+        _db.execute('UPDATE messages SET text = ?, file_name = ?, file_path = ?, thumb = ? WHERE id = ?', [
+          _seal(row['text'], 'text', id),
+          _seal(row['file_name'], 'file_name', id),
+          _seal(row['file_path'], 'file_path', id),
+          _seal(row['thumb'], 'thumb', id),
+          id,
+        ]);
+      }
+      _db.execute("INSERT INTO meta VALUES ('check', ?)", [cipher.seal(_check, 'meta.check')]);
+    });
+    if (messages.isNotEmpty) {
+      // Compacte la base : les pages qui contenaient le texte en clair disparaissent.
+      _db.execute('PRAGMA wal_checkpoint(TRUNCATE)');
+      _db.execute('VACUUM');
+      _db.execute('PRAGMA wal_checkpoint(TRUNCATE)');
+    }
+  }
+
+  Object? _seal(Object? value, String column, String messageId) {
+    final cipher = _cipher;
+    if (cipher == null || value == null || _isSealed(value)) return value;
+    final data = value is String ? utf8.encode(value) : value as List<int>;
+    return cipher.seal(data, 'messages.$column:$messageId');
+  }
+
+  Uint8List? _openRaw(Object? value, String column, String messageId) {
+    final cipher = _cipher;
+    if (cipher == null) return null;
+    try {
+      return cipher.open(value! as Uint8List, 'messages.$column:$messageId');
+    } on FormatException {
+      return null;
+    }
+  }
+
+  String _openText(Object? value, String column, String messageId, [String fallback = unreadable]) {
+    if (!_isSealed(value)) return value as String;
+    final raw = _openRaw(value, column, messageId);
+    if (raw == null) return fallback;
+    try {
+      return utf8.decode(raw);
+    } on FormatException {
+      return fallback;
+    }
+  }
+
+  Uint8List? _openBytes(Object? value, String column, String messageId) {
+    if (!_isSealed(value)) return value as Uint8List?;
+    return _openRaw(value, column, messageId) ?? Uint8List(0);
+  }
+
+  FileInfo? _file(Row row, [String prefix = '']) {
+    if (row['${prefix}kind'] != 'file') return null;
+    final id = row['${prefix}id'] as String;
+    final path = row['${prefix}file_path'];
+    return FileInfo(
+      _openText(row['${prefix}file_name'], 'file_name', id, 'fichier'),
+      row['${prefix}file_size'] as int,
+      FileState.parse(row['${prefix}file_state'] as String),
+      path == null ? null : _openText(path, 'file_path', id, ''),
+      _openBytes(row['${prefix}thumb'], 'thumb', id),
+    );
+  }
+
+  MessageRecord _message(Row row) => MessageRecord(
+    row['id'] as String,
+    row['contact_id'] as String,
+    row['outgoing'] == 1,
+    _openText(row['text'], 'text', row['id'] as String),
+    row['ts'] as int,
+    Status.parse(row['status'] as String),
+    file: _file(row),
+  );
 
   // -- Contacts --------------------------------------------------------
   /// Crée ou met à jour un contact ; les champs `null` sont conservés.
@@ -269,7 +449,7 @@ class Store {
           row['m_id'] as String,
           row['id'] as String,
           row['m_outgoing'] == 1,
-          row['m_text'] as String,
+          _openText(row['m_text'], 'text', row['m_id'] as String),
           row['m_ts'] as int,
           Status.parse(row['m_status'] as String),
           file: _file(row, 'm_'),
@@ -304,15 +484,15 @@ class Store {
         record.id,
         record.contactId,
         record.outgoing ? 1 : 0,
-        record.text,
+        _seal(record.text, 'text', record.id),
         record.ts,
         record.status.value,
         f != null ? 'file' : 'text',
-        f?.name,
+        _seal(f?.name, 'file_name', record.id),
         f?.size,
         f?.state.value,
-        f?.path,
-        f != null && f.thumb.isNotEmpty ? f.thumb : null,
+        _seal(f?.path, 'file_path', record.id),
+        _seal(f != null && f.thumb.isNotEmpty ? f.thumb : null, 'thumb', record.id),
       ],
     );
     return _db.updatedRows == 1;
@@ -419,7 +599,11 @@ class Store {
     final newState = state ?? file.state;
     final newPath = path ?? file.path;
     if (newState == file.state && newPath == file.path) return false;
-    _db.execute('UPDATE messages SET file_state = ?, file_path = ? WHERE id = ?', [newState.value, newPath, messageId]);
+    _db.execute('UPDATE messages SET file_state = ?, file_path = ? WHERE id = ?', [
+      newState.value,
+      _seal(newPath, 'file_path', messageId),
+      messageId,
+    ]);
     return true;
   }
 
@@ -462,25 +646,4 @@ Contact _contact(Row row) => Contact(
   lastSeen: row['last_seen'] as int,
   publicKey: row['public_key'] as String?,
   pendingKey: row['pending_key'] as String?,
-);
-
-FileInfo? _file(Row row, [String prefix = '']) {
-  if (row['${prefix}kind'] != 'file') return null;
-  return FileInfo(
-    row['${prefix}file_name'] as String,
-    row['${prefix}file_size'] as int,
-    FileState.parse(row['${prefix}file_state'] as String),
-    row['${prefix}file_path'] as String?,
-    row['${prefix}thumb'] as Uint8List?,
-  );
-}
-
-MessageRecord _message(Row row) => MessageRecord(
-  row['id'] as String,
-  row['contact_id'] as String,
-  row['outgoing'] == 1,
-  row['text'] as String,
-  row['ts'] as int,
-  Status.parse(row['status'] as String),
-  file: _file(row),
 );

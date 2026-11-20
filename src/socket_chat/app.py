@@ -10,7 +10,7 @@ from importlib.resources import files
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from . import __version__, identity
+from . import __version__, identity, vault
 
 ORGANIZATION = "SocketChat"
 APPLICATION = "SocketChat"
@@ -64,6 +64,41 @@ def _instance_name() -> str:
     return "socket-chat-" + "".join(c for c in user if c.isalnum())
 
 
+def open_history(data_dir: Path):
+    """Historique chiffré du poste ; renvoie ``(store, avertissement ou None)``.
+
+    La clé (``history.key``) est protégée par ``vault``. Si elle est perdue ou illisible
+    (profil copié sur un autre poste, autre compte Windows), l'historique ne peut plus
+    être lu : il est mis de côté (renommé, jamais effacé) et un nouveau commence.
+    """
+    from .store import HistoryLockedError, Store
+
+    path = data_dir / "history.sqlite3"
+    key_path = data_dir / "history.key"
+    lost = False
+    try:
+        key, _created = vault.load_or_create(key_path)
+    except vault.SecretUnavailableError as exc:
+        log.warning("Clé de l'historique illisible (%s)", exc)
+        vault.set_aside(key_path)
+        key, _created = vault.load_or_create(key_path)
+        lost = True
+    try:
+        return Store(path, key), None
+    except HistoryLockedError as exc:
+        log.warning("Historique illisible (%s)", exc)
+        lost = True
+    old = vault.set_aside(path)
+    store = Store(path, key)
+    if not lost or old is None:
+        return store, None
+    return store, (
+        "L'historique des conversations de ce poste ne peut plus être déchiffré (clé "
+        "perdue ou profil venu d'un autre poste). Un nouvel historique commence ; l'ancien "
+        f"est conservé, chiffré, dans « {old.name} »."
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
 
@@ -75,7 +110,6 @@ def main(argv: list[str] | None = None) -> int:
     from .discovery import Discovery
     from .messenger import Messenger
     from .settings import Settings
-    from .store import Store
     from .ui.main_window import MainWindow
     from .ui.tray import Tray
     from .ui.updates import UpdateBanner, UpdateController
@@ -110,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
     log.info("Socket Chat %s démarré (journal : %s)", __version__, log_file)
 
     settings = Settings()
-    store = Store(data_dir / "history.sqlite3")
+    store, history_warning = open_history(data_dir)
     keys = identity.load_or_create(data_dir / "identity.key")
     messenger = Messenger(store, settings.user_id, settings.name, keys)
     allowed_networks = settings.allowed_networks
@@ -137,6 +171,8 @@ def main(argv: list[str] | None = None) -> int:
         log.warning("Détection automatique indisponible : ajout par adresse uniquement")
 
     window = MainWindow(settings, messenger, discovery)
+    if history_warning:
+        QMessageBox.warning(None, "Socket Chat", history_warning)
     banner = UpdateBanner(window)
     window.add_banner(banner)
     updates = UpdateController(settings, messenger, banner, window)
