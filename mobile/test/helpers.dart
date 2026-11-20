@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:socket_chat_mobile/core/signal.dart';
 import 'package:socket_chat_mobile/net/messenger.dart';
+import 'package:socket_chat_mobile/net/noise.dart';
 import 'package:socket_chat_mobile/protocol/protocol.dart';
 import 'package:socket_chat_mobile/store/store.dart';
 
@@ -42,8 +43,8 @@ Future<void> pause([int ms = 200]) => Future<void>.delayed(Duration(milliseconds
 class Messengers {
   final List<Messenger> _created = [];
 
-  Future<Messenger> make(String name, {String? userId, Store? store, bool start = true}) async {
-    final messenger = Messenger(store ?? Store(), userId ?? newId(), name);
+  Future<Messenger> make(String name, {String? userId, Store? store, bool start = true, KeyPair? identity}) async {
+    final messenger = Messenger(store ?? Store(), userId ?? newId(), name, identity: identity);
     _created.add(messenger);
     if (start) expect(await messenger.start(0), isTrue);
     return messenger;

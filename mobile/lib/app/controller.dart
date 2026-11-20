@@ -22,7 +22,7 @@ class ChatController extends ChangeNotifier {
     this.platform = const NetworkPlatform(),
     this.useDiscovery = true,
     this.useNetwork = true,
-  }) : messenger = Messenger(store, settings.userId, settings.name ?? 'Android') {
+  }) : messenger = Messenger(store, settings.userId, settings.name ?? 'Android', identity: settings.identity) {
     messenger.contactsChanged.connect((_) => _changed());
     messenger.messageAdded.connect(_onMessageAdded);
     messenger.messageStatusChanged.connect((_) => _changed());
@@ -30,6 +30,8 @@ class ChatController extends ChangeNotifier {
     messenger.fileProgress.connect((_) => _changed());
     messenger.typingChanged.connect((_) => _changed());
     messenger.presenceChanged.connect((_) => _changed());
+    messenger.keyChanged.connect((_) => _changed());
+    messenger.keyRefused.connect((_) => _changed());
     messenger.error.connect(errors.emit);
   }
 

@@ -1,4 +1,8 @@
-// Connexion TCP avec un pair, transposée de src/socket_chat/network.py.
+// Connexion TCP chiffrée avec un pair, transposée de src/socket_chat/network.py.
+//
+// Protocole 4 : poignée de main Noise XX (noise.dart), qui prouve la clé de chaque
+// appareil et établit les clés de session, puis flux chiffré transportant les trames
+// JSON habituelles, à commencer par la présentation (« hello »).
 //
 // RawSocket plutôt que Socket : on garde notre propre file d'envoi pour connaître
 // le volume en attente (contrôle de flux des transferts) et être prévenu quand il
@@ -11,12 +15,17 @@ import 'dart:typed_data';
 
 import '../core/signal.dart';
 import '../protocol/protocol.dart';
+import 'noise.dart' as noise;
 
 /// Délai maximal pour établir la connexion TCP (ms).
 int connectTimeoutMs = 10000;
 
-/// Délai maximal pour recevoir la présentation (« hello ») du pair (ms).
+/// Délai maximal pour la poignée de main et la présentation (« hello ») du pair (ms).
 int handshakeTimeoutMs = 10000;
+
+const String oldVersionError =
+    'Ce correspondant utilise une ancienne version de Socket Chat, sans chiffrement : '
+    'il doit la mettre à jour (version 4 ou plus récente).';
 
 /// Délai maximal accordé à une fermeture polie avant de couper la connexion (ms).
 int closeTimeoutMs = 3000;
@@ -46,25 +55,35 @@ String describeSocketError(Object error) {
 
 String _plainAddress(String address) => address.startsWith('::ffff:') ? address.substring(7) : address;
 
-/// Connexion avec un pair, au-dessus d'une [RawSocket].
+/// Connexion chiffrée avec un pair, au-dessus d'une [RawSocket].
 ///
-/// Gère la présentation mutuelle (« hello »), le découpage des trames et la
-/// fermeture. Le signal [closed] est émis exactement une fois.
+/// Gère la poignée de main Noise, la présentation mutuelle (« hello »), le
+/// chiffrement et le découpage des trames, et la fermeture. Le signal [closed] est
+/// émis exactement une fois. [peerKey] est la clé publique prouvée du pair
+/// (disponible dès [ready]).
 ///
 /// [outgoing] indique qui a ouvert la connexion : ce poste ([PeerConnection.outgoing],
 /// puis [connectToHost]) ou le pair ([PeerConnection.accepted]).
 class PeerConnection {
-  PeerConnection.outgoing(this._hello) : outgoing = true;
+  PeerConnection.outgoing(this._hello, noise.KeyPair identity)
+    : outgoing = true,
+      _noise = noise.HandshakeState(true, identity, prologue: noise.prologue);
 
-  PeerConnection.accepted(RawSocket socket, this._hello) : outgoing = false {
+  PeerConnection.accepted(RawSocket socket, this._hello, noise.KeyPair identity)
+    : outgoing = false,
+      _noise = noise.HandshakeState(false, identity, prologue: noise.prologue) {
     _attach(socket);
-    // La socket est déjà connectée. La présentation est différée pour laisser
+    // La socket est déjà connectée. La poignée de main est différée pour laisser
     // l'appelant brancher ses signaux.
-    Timer.run(_sendHello);
+    Timer.run(_start);
   }
 
   final Message _hello;
   final bool outgoing;
+  final noise.HandshakeState _noise;
+  final noise.FrameReader _frames = noise.FrameReader();
+  bool _started = false;
+  bool _receivedAny = false;
 
   /// Identifiant, nom et port d'écoute du pair.
   final Signal<(String, String, int)> ready = Signal();
@@ -103,6 +122,10 @@ class PeerConnection {
   String? get peerName => _peerName;
   String get peerAddress => _peerAddress;
 
+  /// Clé publique du pair, prouvée par la poignée de main (`null` avant).
+  Uint8List? get peerKey => _noise.complete ? _noise.remoteStatic : null;
+  bool get secure => _noise.complete;
+
   /// Octets en attente d'envoi (pour ne pas saturer la mémoire lors d'un transfert).
   int get pendingBytes => _pendingBytes;
 
@@ -139,7 +162,7 @@ class PeerConnection {
           return;
         }
         _attach(socket);
-        _sendHello();
+        _start();
       }, onError: _onConnectError);
     }, onError: _onConnectError);
   }
@@ -147,11 +170,11 @@ class PeerConnection {
   /// Termine poliment la conversation (envoie « bye » puis ferme).
   void close([String reason = '']) {
     if (_finished) return;
-    if (_socket != null && !_closing) {
+    if (_socket != null && !_closing && secure) {
       _closeReason = reason;
       _write(Message.bye(reason));
       _beginClose();
-    } else if (_socket == null) {
+    } else if (_socket == null || !secure) {
       abort(reason);
     }
   }
@@ -193,7 +216,10 @@ class PeerConnection {
   }
 
   void _write(Message message) {
-    final frame = encode(message);
+    _queueBytes(noise.encryptStream(_noise.send!, encode(message)));
+  }
+
+  void _queueBytes(Uint8List frame) {
     _queue.add(frame);
     _pendingBytes += frame.length;
     // L'écriture effective a lieu au prochain tour de boucle (événement « write »),
@@ -243,28 +269,55 @@ class PeerConnection {
     }
   }
 
-  void _sendHello() {
-    if (_finished || _helloSent || _socket == null) return;
-    _helloSent = true;
+  /// Connexion TCP établie : l'initiateur ouvre la poignée de main.
+  void _start() {
+    if (_finished || _started || _socket == null) return;
+    _started = true;
     _connectTimer?.cancel();
+    // Délai pour la poignée de main et la présentation du pair.
+    _handshakeTimer = Timer(Duration(milliseconds: handshakeTimeoutMs), () {
+      _fail("Le correspondant ne s'est pas présenté à temps.");
+    });
+    if (outgoing) _queueBytes(noise.frame(_noise.writeMessage()));
+  }
+
+  /// Envoie notre présentation une seule fois (idempotent), une fois chiffré.
+  void _sendHello() {
+    if (_finished || _helloSent || !secure) return;
+    _helloSent = true;
     _write(_hello);
-    if (_peerId == null) {
-      // Délai accordé au pair pour se présenter, s'il ne l'a pas déjà fait.
-      _handshakeTimer = Timer(Duration(milliseconds: handshakeTimeoutMs), () {
-        _fail("Le correspondant ne s'est pas présenté à temps.");
-      });
-    }
   }
 
   void _onData(Uint8List data) {
-    List<Message> messages;
+    if (!secure && !_started) _start(); // données reçues avant le tour de boucle différé
+    if (!_receivedAny && data.isNotEmpty) {
+      _receivedAny = true;
+      if (data[0] == 0x7b) {
+        // « { » : présentation JSON en clair, pair en protocole 3 ou plus ancien.
+        _fail(oldVersionError);
+        return;
+      }
+    }
     try {
-      messages = _decoder.feed(data);
+      for (final message in _frames.feed(data)) {
+        if (_finished) return;
+        if (secure) {
+          _receive(_noise.receive!.decrypt(const [], message));
+        } else {
+          _noise.readMessage(message);
+          if (_noise.myTurn) _queueBytes(noise.frame(_noise.writeMessage()));
+          if (secure) _sendHello();
+        }
+      }
+    } on noise.NoiseException catch (error) {
+      _fail('Connexion chiffrée impossible : $error');
     } on ProtocolException catch (error) {
       _fail('Données invalides reçues : $error');
-      return;
     }
-    for (final message in messages) {
+  }
+
+  void _receive(Uint8List plaintext) {
+    for (final message in _decoder.feed(plaintext)) {
       if (_finished) return;
       _handle(message);
     }
@@ -276,10 +329,6 @@ class PeerConnection {
       _handshakeTimer?.cancel();
       _peerId = message.id;
       _peerName = message.name;
-      // Sur une connexion acceptée, notre présentation est différée d'un tour de
-      // boucle : si celle du pair arrive avant, on l'envoie maintenant, avant que
-      // quoi que ce soit d'autre ne parte (le pair couperait la connexion).
-      _sendHello();
       ready.emit((message.id, message.name, message.port));
     } else if (message.type == MessageType.bye) {
       _closeReason = message.reason;

@@ -1,5 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../net/identity.dart';
+import '../net/noise.dart';
 import '../protocol/protocol.dart';
 
 /// Stockage clé-valeur des préférences (shared_preferences sur l'appareil).
@@ -35,18 +37,23 @@ class MemoryPreferenceStore implements PreferenceStore {
   Future<void> setInt(String key, int value) async => values[key] = value;
 }
 
-/// Préférences de l'appareil : identifiant stable, nom affiché, port d'écoute.
+/// Préférences de l'appareil : identifiant stable, clé, nom affiché, port d'écoute.
 class Settings {
-  Settings._(this._prefs, this.userId, this.name, this.port);
+  Settings._(this._prefs, this.userId, this.identity, this.name, this.port);
 
   static const _userIdKey = 'user_id';
   static const _nameKey = 'name';
   static const _portKey = 'port';
+  static const _identityKey = 'identity_key';
 
   final PreferenceStore _prefs;
 
   /// Identifiant de cet appareil auprès des contacts (ne change jamais).
   final String userId;
+
+  /// Clé X25519 de l'appareil (protocole 4), créée au premier lancement. Les
+  /// préférences sont privées à l'application (inaccessibles aux autres applications).
+  final KeyPair identity;
 
   /// `null` tant que l'utilisateur n'a pas choisi son nom (premier lancement).
   String? name;
@@ -62,9 +69,24 @@ class Settings {
     return Settings._(
       prefs,
       userId!,
+      await _loadIdentity(prefs),
       await prefs.getString(_nameKey),
       port != null && port > 0 && port < 65536 ? port : defaultPort,
     );
+  }
+
+  static Future<KeyPair> _loadIdentity(PreferenceStore prefs) async {
+    final stored = await prefs.getString(_identityKey);
+    if (stored != null) {
+      try {
+        return KeyPair(decodeKey(stored));
+      } on Object {
+        // Clé abîmée : une nouvelle est créée ; les contacts verront « clé changée ».
+      }
+    }
+    final keys = KeyPair.generate();
+    await prefs.setString(_identityKey, encodeKey(keys.private));
+    return keys;
   }
 
   Future<void> save() async {

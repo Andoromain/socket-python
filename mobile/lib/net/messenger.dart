@@ -17,6 +17,8 @@ import '../protocol/protocol.dart';
 import '../store/store.dart';
 import 'connection.dart';
 import 'discovery.dart';
+import 'identity.dart';
+import 'noise.dart' as noise;
 import 'transfers.dart';
 
 /// Intervalle minimal entre deux indications « écrit… » envoyées (ms).
@@ -32,14 +34,24 @@ const String duplicateReason = 'duplicate';
 const String selfReason = 'self';
 const String selfError = 'Cette adresse est celle de votre propre appareil.';
 
+/// Clé présentée différente de la clé épinglée : connexion refusée.
+const String keyReason = 'key';
+const String keyError =
+    'La clé de sécurité de ce contact a changé : connexion refusée. Vérifiez avec cette '
+    'personne (réinstallation ?) puis acceptez la nouvelle clé dans votre conversation.';
+const String keyRefusedError =
+    'Ce contact a refusé la connexion : il connaît une autre clé de sécurité pour cet '
+    'appareil. Votre nouvelle clé doit être acceptée de son côté, dans votre conversation.';
+
 /// Aperçu JPEG d'une image à envoyer (vide si ce n'en est pas une).
 typedef Thumbnailer = Uint8List Function(String path);
 
 Uint8List _noThumbnail(String path) => Uint8List(0);
 
 class Messenger {
-  Messenger(this.store, this.userId, String name, {this.thumbnailer = _noThumbnail})
+  Messenger(this.store, this.userId, String name, {this.thumbnailer = _noThumbnail, noise.KeyPair? identity})
     : _name = validateName(name),
+      identity = identity ?? noise.KeyPair.generate(),
       transfers = FileTransfers(store) {
     transfers.changed.connect(_onTransferChanged);
     transfers.progress.connect(fileProgress.emit);
@@ -47,6 +59,9 @@ class Messenger {
 
   final Store store;
   final String userId;
+
+  /// Clé de l'appareil (Settings.identity) ; éphémère si absente (tests).
+  final noise.KeyPair identity;
   String _name;
   final Thumbnailer thumbnailer;
   final FileTransfers transfers;
@@ -69,6 +84,12 @@ class Messenger {
 
   /// Contact, en ligne.
   final Signal<(String, bool)> presenceChanged = Signal();
+
+  /// Contact dont une nouvelle clé attend d'être acceptée (ou ne l'attend plus).
+  final Signal<String> keyChanged = Signal();
+
+  /// Contact, refuse notre clé (il en connaît une autre pour cet appareil).
+  final Signal<(String, bool)> keyRefused = Signal();
   final Signal<String> error = Signal();
 
   RawServerSocket? _server;
@@ -77,6 +98,8 @@ class Messenger {
   final Set<PeerConnection> _pending = {}; // présentation pas encore reçue
   final Map<String, PeerConnection> _dialing = {}; // connexions sortantes par contact
   final Set<PeerConnection> _manual = {}; // ajouts par adresse (erreurs affichées)
+  final Set<PeerConnection> _manualReady = {}; // ajouts par adresse, identifiés
+  final Set<String> _refusedBy = {}; // contacts qui refusent notre clé (déjà signalés)
   final Set<String> _discovered = {};
   final Map<String, Timer> _typingTimers = {};
   final Set<String> _typing = {}; // contacts en train d'écrire
@@ -96,6 +119,48 @@ class Messenger {
   bool isOnline(String contactId) => _connections.containsKey(contactId) || _discovered.contains(contactId);
 
   bool isTyping(String contactId) => _typing.contains(contactId);
+
+  /// Le contact refuse actuellement la clé de cet appareil.
+  bool refusesOurKey(String contactId) => _refusedBy.contains(contactId);
+
+  @visibleForTesting
+  void debugRefusedBy(String contactId, bool refused) {
+    if (refused ? _refusedBy.add(contactId) : _refusedBy.remove(contactId)) {
+      keyRefused.emit((contactId, refused));
+    }
+  }
+
+  /// Clé épinglée du contact (`null` s'il ne s'est jamais connecté en version 4).
+  Uint8List? contactKey(String contactId) {
+    final key = store.contact(contactId)?.publicKey;
+    return key == null ? null : decodeKey(key);
+  }
+
+  /// L'utilisateur accepte la nouvelle clé présentée par ce contact.
+  void trustNewKey(String contactId) {
+    final contact = store.contact(contactId);
+    final pending = contact?.pendingKey;
+    if (contact == null || pending == null) return;
+    store.pinKey(contactId, pending);
+    keyChanged.emit(contactId);
+    connectTo(contactId);
+  }
+
+  /// Vrai si [key] est la clé épinglée du contact (ou s'il n'en a pas encore).
+  bool _checkKey(String peerId, Uint8List key) {
+    final contact = store.contact(peerId);
+    if (contact == null || contact.publicKey == null) return true;
+    final encoded = encodeKey(key);
+    if (encoded == contact.publicKey) {
+      if (contact.pendingKey != null) {
+        store.setPendingKey(peerId, null); // fausse alerte : clé d'origine
+        keyChanged.emit(peerId);
+      }
+      return true;
+    }
+    if (store.setPendingKey(peerId, encoded)) keyChanged.emit(peerId);
+    return false;
+  }
 
   @visibleForTesting
   Map<String, PeerConnection> get connections => _connections;
@@ -292,6 +357,9 @@ class Messenger {
   void onPeerSeen(String contactId, String name, String host, int port) {
     if (contactId == userId) return;
     final previous = store.contact(contactId);
+    // Annonce non authentifiée : le nom d'un contact vérifié ne change que par sa
+    // présentation chiffrée (sinon n'importe qui pourrait le renommer).
+    if (previous != null && previous.publicKey != null) name = previous.name;
     store.upsertContact(contactId, name, host: host, port: port, lastSeen: nowMs());
     final moved = previous != null && (previous.host != host || previous.port != port);
     final stale = _dialing[contactId];
@@ -324,14 +392,14 @@ class Messenger {
   Message _hello() => Message.hello(userId, _name, port ?? 0);
 
   PeerConnection _dial(String host, int port) {
-    final conn = PeerConnection.outgoing(_hello());
+    final conn = PeerConnection.outgoing(_hello(), identity);
     _watch(conn);
     conn.connectToHost(host, port);
     return conn;
   }
 
   void _onNewConnection(RawSocket socket) {
-    _watch(PeerConnection.accepted(socket, _hello()));
+    _watch(PeerConnection.accepted(socket, _hello(), identity));
   }
 
   void _watch(PeerConnection conn) {
@@ -346,11 +414,18 @@ class Messenger {
     _pending.remove(conn);
     final manual = _manual.remove(conn);
     if (_dialing[peerId] == conn) _dialing.remove(peerId);
-    if (peerId == userId) {
+    final key = conn.peerKey;
+    if (peerId == userId || key == null || _sameBytes(key, identity.public)) {
       conn.close(selfReason);
       if (manual) error.emit(selfError);
       return;
     }
+    if (!_checkKey(peerId, key)) {
+      conn.close(keyReason);
+      if (manual) error.emit(keyError);
+      return;
+    }
+    if (manual) _manualReady.add(conn);
 
     final existing = _connections[peerId];
     if (existing != null && existing != conn) {
@@ -368,7 +443,10 @@ class Messenger {
       _connections[peerId] = conn;
     }
 
+    final wasPinned = store.contact(peerId)?.publicKey != null;
     store.upsertContact(peerId, name, host: conn.peerAddress, port: port, lastSeen: nowMs());
+    // Premier contact chiffré : la clé est épinglée (confiance au premier usage).
+    if (!wasPinned) store.pinKey(peerId, encodeKey(key));
     if (existing == null && !_discovered.contains(peerId)) presenceChanged.emit((peerId, true));
     contactsChanged.emit(null);
     for (final record in store.undeliveredOutgoing(peerId)) {
@@ -385,6 +463,10 @@ class Messenger {
   void _onMessage(PeerConnection conn, Message message) {
     final peerId = conn.peerId;
     if (peerId == null || _connections[peerId] != conn) return;
+    if (_refusedBy.remove(peerId)) {
+      // Le contact nous parle : il a accepté notre nouvelle clé.
+      keyRefused.emit((peerId, false));
+    }
     switch (message.type) {
       case MessageType.chat || MessageType.fileOffer:
         _receiveChat(conn, peerId, message);
@@ -444,10 +526,18 @@ class Messenger {
       // peut fermer avant d'avoir reçu notre présentation.
       if (reason == selfReason) {
         error.emit(selfError);
+      } else if (reason == keyReason) {
+        error.emit(keyRefusedError);
       } else {
         error.emit('Impossible de joindre cet appareil : ${reason.isEmpty ? 'connexion fermée.' : reason}');
       }
     }
+    final refusedBy = conn.peerId;
+    if (reason == keyReason && refusedBy != null) {
+      if (_manualReady.contains(conn)) error.emit(keyRefusedError);
+      if (_refusedBy.add(refusedBy)) keyRefused.emit((refusedBy, true));
+    }
+    _manualReady.remove(conn);
     final peerId = conn.peerId;
     if (peerId != null && _connections[peerId] == conn) {
       _connections.remove(peerId);
@@ -521,4 +611,12 @@ class Messenger {
 
   @visibleForTesting
   void debugOnClosed(PeerConnection conn, String reason) => _onClosed(conn, reason);
+}
+
+bool _sameBytes(List<int> a, List<int> b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
 }

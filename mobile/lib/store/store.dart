@@ -6,7 +6,7 @@ import 'dart:typed_data';
 
 import 'package:sqlite3/sqlite3.dart';
 
-const int schemaVersion = 2;
+const int schemaVersion = 3;
 
 const Set<String> imageExtensions = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'};
 
@@ -44,6 +44,12 @@ const Map<int, String> _migrations = {
         emoji      TEXT NOT NULL,
         PRIMARY KEY (message_id, author)
     );
+  ''',
+  // Protocole 4 : clé publique (Noise) de chaque contact, épinglée au premier contact
+  // chiffré, et nouvelle clé présentée en attendant que l'utilisateur l'accepte.
+  3: '''
+    ALTER TABLE contacts ADD COLUMN public_key TEXT;
+    ALTER TABLE contacts ADD COLUMN pending_key TEXT;
   ''',
 };
 
@@ -106,12 +112,18 @@ class FileInfo {
 }
 
 class Contact {
-  const Contact(this.id, this.name, {this.host, this.port, this.lastSeen = 0});
+  const Contact(this.id, this.name, {this.host, this.port, this.lastSeen = 0, this.publicKey, this.pendingKey});
   final String id;
   final String name;
   final String? host;
   final int? port;
   final int lastSeen;
+
+  /// Clé publique X25519 épinglée (base64) ; `null` tant qu'aucune connexion chiffrée.
+  final String? publicKey;
+
+  /// Clé différente présentée par ce contact, refusée en attendant l'utilisateur.
+  final String? pendingKey;
 }
 
 class MessageRecord {
@@ -214,6 +226,17 @@ class Store {
       ''',
       [contactId, name, host, port, lastSeen],
     );
+  }
+
+  /// Épingle la clé du contact (et oublie toute clé en attente).
+  void pinKey(String contactId, String publicKey) {
+    _db.execute('UPDATE contacts SET public_key = ?, pending_key = NULL WHERE id = ?', [publicKey, contactId]);
+  }
+
+  /// Mémorise (ou efface) la nouvelle clé refusée ; vrai si elle a changé.
+  bool setPendingKey(String contactId, String? publicKey) {
+    _db.execute('UPDATE contacts SET pending_key = ?1 WHERE id = ?2 AND pending_key IS NOT ?1', [publicKey, contactId]);
+    return _db.updatedRows > 0;
   }
 
   Contact? contact(String contactId) {
@@ -437,6 +460,8 @@ Contact _contact(Row row) => Contact(
   host: row['host'] as String?,
   port: row['port'] as int?,
   lastSeen: row['last_seen'] as int,
+  publicKey: row['public_key'] as String?,
+  pendingKey: row['pending_key'] as String?,
 );
 
 FileInfo? _file(Row row, [String prefix = '']) {

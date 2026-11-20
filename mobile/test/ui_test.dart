@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:socket_chat_mobile/app/controller.dart';
 import 'package:socket_chat_mobile/app/settings.dart';
+import 'package:socket_chat_mobile/net/identity.dart';
+import 'package:socket_chat_mobile/net/noise.dart';
 import 'package:socket_chat_mobile/store/store.dart';
 import 'package:socket_chat_mobile/ui/app.dart';
 
@@ -187,5 +189,65 @@ void main() {
     await tester.pumpAndSettle();
     // Sans réseau dans ce test, la messagerie n'écoute pas : l'ajout est refusé.
     expect(find.text("La messagerie n'est pas démarrée (voir Préférences)."), findsOneWidget);
+  });
+
+  testWidgets('code de sécurité et nouvelle clé à accepter', (tester) async {
+    final controller = await makeController();
+    populate(controller.store);
+    final aliceKey = KeyPair.generate().public;
+    final newKey = KeyPair.generate().public;
+    controller.store.pinKey(alice, encodeKey(aliceKey));
+    controller.store.setPendingKey(alice, encodeKey(newKey));
+    await tester.pumpWidget(SocketChatApp(controller: controller));
+    await tester.tap(find.text('Alice Martin'));
+    await tester.pumpAndSettle();
+
+    // Code de sécurité : le même que celui calculé chez Alice.
+    await tester.tap(find.byKey(const Key('safety-number')));
+    await tester.pumpAndSettle();
+    final expected = formatSafetyNumber(safetyNumber(aliceKey, controller.messenger.identity.public));
+    expect(find.text(expected), findsOneWidget);
+    await tester.tap(find.text('Fermer'));
+    await tester.pumpAndSettle();
+
+    // Clé changée : bandeau, confirmation refusée puis acceptée.
+    expect(find.byKey(const Key('changed-key')), findsOneWidget);
+    await tester.tap(find.text('Accepter la nouvelle clé…'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Annuler'));
+    await tester.pumpAndSettle();
+    expect(controller.store.contact(alice)!.pendingKey, isNotNull);
+    await tester.tap(find.text('Accepter la nouvelle clé…'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Accepter'));
+    await tester.pumpAndSettle();
+    expect(controller.store.contact(alice)!.publicKey, encodeKey(newKey));
+    controller.messenger.keyChanged.emit(alice);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('changed-key')), findsNothing);
+
+    // Contact jamais vérifié : explication à la place du code.
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Bob Durand'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('safety-number')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('pas encore connecté'), findsOneWidget);
+  });
+
+  testWidgets('clé de cet appareil refusée par le contact', (tester) async {
+    final controller = await makeController();
+    populate(controller.store);
+    await tester.pumpWidget(SocketChatApp(controller: controller));
+    await tester.tap(find.text('Alice Martin'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('refused-key')), findsNothing);
+    controller.messenger.debugRefusedBy(alice, true);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('refused-key')), findsOneWidget);
+    controller.messenger.debugRefusedBy(alice, false);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('refused-key')), findsNothing);
   });
 }

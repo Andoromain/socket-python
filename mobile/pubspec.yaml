@@ -43,6 +43,7 @@ dependencies:
   intl: ^0.20.3
   sqlite3: ^3.9.0
   meta: ^1.19.0
+  cryptography: ^2.9.0
 
 dev_dependencies:
   flutter_test:

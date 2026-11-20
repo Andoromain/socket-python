@@ -1,10 +1,16 @@
 // Transposition de tests/test_messenger.py et tests/test_network_order.py.
 
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+
+import 'dart:typed_data';
+
 import 'package:socket_chat_mobile/net/connection.dart';
+import 'package:socket_chat_mobile/net/identity.dart';
 import 'package:socket_chat_mobile/net/messenger.dart';
+import 'package:socket_chat_mobile/net/noise.dart' as noise;
 import 'package:socket_chat_mobile/protocol/protocol.dart';
 import 'package:socket_chat_mobile/store/store.dart';
 
@@ -94,7 +100,7 @@ void main() {
     expect(status(alice, record.id), Status.pending);
 
     // Bob revient (même identité, même historique, nouveau port) et est détecté.
-    final bob2 = await messengers.make('Bob', userId: bobId, store: bobStore);
+    final bob2 = await messengers.make('Bob', userId: bobId, store: bobStore, identity: bob.identity);
     final added = next(bob2.messageAdded);
     alice.onPeerSeen(bobId, 'Bob', '127.0.0.1', bob2.port!);
     expect((await added).text, 'Tu verras ça en revenant');
@@ -165,7 +171,7 @@ void main() {
       final alice = await messengers.make('Alice', start: false);
       final errors = <String>[];
       alice.error.connect(errors.add);
-      final conn = PeerConnection.outgoing(Message.hello(alice.userId, 'Alice', 1));
+      final conn = PeerConnection.outgoing(Message.hello(alice.userId, 'Alice', 1), alice.identity);
       alice.debugWatch(conn, manual: true);
       if (!byeFirst) alice.debugOnReady(conn, alice.userId, 'Alice', 1);
       alice.debugOnClosed(conn, selfReason);
@@ -211,95 +217,223 @@ void main() {
     expect((await added).id, record.id);
   });
 
-  group('ordre de la présentation', () {
-    late ServerSocket server;
+  group('connexion chiffrée vue sur le fil', () {
     late Socket client;
     late RawSocket accepted;
-    final frames = <Message>[];
+    late _NoiseClient peer;
 
     setUp(() async {
-      frames.clear();
-      server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-      // Le serveur de test est un RawServerSocket, comme Messenger.
-      await server.close();
       final raw = await RawServerSocket.bind(InternetAddress.loopbackIPv4, 0);
       final incoming = raw.first;
       client = await Socket.connect('127.0.0.1', raw.port);
       accepted = await incoming;
       await raw.close();
-      final decoder = FrameDecoder();
-      client.listen((data) => frames.addAll(decoder.feed(data)));
+      peer = _NoiseClient(client);
     });
     tearDown(() => client.destroy());
 
-    test('notre hello précède les trames envoyées dès que le pair est prêt', () async {
+    PeerConnection serve([String? id]) =>
+        PeerConnection.accepted(accepted, Message.hello(id ?? newId(), 'Moi', 1), noise.KeyPair.generate());
+
+    test('poignée de main, puis notre hello, puis les trames', () async {
       handshakeTimeoutMs = 300;
       addTearDown(() => handshakeTimeoutMs = 10000);
       final myId = newId();
-      final conn = PeerConnection.accepted(accepted, Message.hello(myId, 'Moi', 1));
+      final myKeys = noise.KeyPair.generate();
+      final conn = PeerConnection.accepted(accepted, Message.hello(myId, 'Moi', 1), myKeys);
       final closed = <String>[];
       conn.closed.connect(closed.add);
+      final ready = <(String, String, int)>[];
+      conn.ready.connect(ready.add);
       // Comme Messenger, on envoie quelque chose dès que le pair est identifié.
       conn.ready.connect((_) => conn.send(Message.typing(true)));
 
-      // Le « hello » du pair arrive avant notre présentation différée.
-      client.add(encode(Message.hello(newId(), 'Pair', 2)));
-      await waitUntil(() => frames.length >= 2);
-      expect(frames[0].type, MessageType.hello);
-      expect(frames[0].id, myId);
-      expect(frames[1], Message.typing(true));
+      await peer.handshake();
+      await waitUntil(() => peer.frames.isNotEmpty);
+      expect(peer.frames[0].type, MessageType.hello);
+      expect(peer.frames[0].id, myId);
+      expect(peer.state.remoteStatic, myKeys.public);
+
+      final peerId = newId();
+      peer.send(Message.hello(peerId, 'Pair', 2));
+      await waitUntil(() => peer.frames.length >= 2);
+      expect(peer.frames[1], Message.typing(true));
+      expect(ready, [(peerId, 'Pair', 2)]);
+      expect(conn.peerKey, peer.keys.public);
 
       // Le délai de présentation ne doit pas couper une connexion identifiée.
       await pause(600);
       expect(closed, isEmpty);
       expect(conn.isReady, isTrue);
-      expect(frames.where((f) => f.type == MessageType.hello), hasLength(1));
+      expect(peer.frames.where((f) => f.type == MessageType.hello), hasLength(1));
       conn.abort();
     });
 
-    test('un pair muet est coupé au bout du délai de présentation', () async {
+    test('un pair muet est coupé au bout du délai', () async {
       handshakeTimeoutMs = 200;
       addTearDown(() => handshakeTimeoutMs = 10000);
-      final conn = PeerConnection.accepted(accepted, Message.hello(newId(), 'Moi', 1));
-      final closed = next(conn.closed);
+      final closed = next(serve().closed);
       expect(await closed, contains('présenté'));
     });
 
+    test('un pair en protocole 3 (JSON en clair) est reconnu', () async {
+      final closed = next(serve().closed);
+      client.add(encode(Message.hello(newId(), 'Vieux', 1)));
+      expect(await closed, oldVersionError);
+    });
+
+    test('une poignée de main altérée coupe la connexion', () async {
+      final closed = next(serve().closed);
+      client.add(noise.frame(peer.state.writeMessage()));
+      final msg2 = await peer.nextRaw();
+      peer.state.readMessage(msg2);
+      final msg3 = peer.state.writeMessage();
+      msg3[5] ^= 0xff;
+      client.add(noise.frame(msg3));
+      expect(await closed, startsWith('Connexion chiffrée impossible'));
+    });
+
     test('une trame avant la présentation coupe la connexion', () async {
-      final conn = PeerConnection.accepted(accepted, Message.hello(newId(), 'Moi', 1));
-      final closed = next(conn.closed);
-      client.add(encode(Message.typing(true)));
+      final closed = next(serve().closed);
+      await peer.handshake();
+      peer.send(Message.typing(true));
       expect(await closed, contains('avant la présentation'));
     });
 
     test('des données invalides coupent la connexion', () async {
-      final conn = PeerConnection.accepted(accepted, Message.hello(newId(), 'Moi', 1));
-      final closed = next(conn.closed);
-      client.add('pas du json\n'.codeUnits);
+      final closed = next(serve().closed);
+      await peer.handshake();
+      peer.sendRaw('pas du json\n'.codeUnits);
       expect(await closed, contains('Données invalides'));
     });
 
     test('fermeture polie : bye puis fin de connexion', () async {
-      final conn = PeerConnection.accepted(accepted, Message.hello(newId(), 'Moi', 1));
-      client.add(encode(Message.hello(newId(), 'Pair', 2)));
+      final conn = serve();
+      await peer.handshake();
+      peer.send(Message.hello(newId(), 'Pair', 2));
       await waitUntil(() => conn.isReady);
       final closed = next(conn.closed);
       conn.close('au revoir');
-      await waitUntil(() => frames.any((f) => f.type == MessageType.bye));
-      expect(frames.last, Message.bye('au revoir'));
+      await waitUntil(() => peer.frames.any((f) => f.type == MessageType.bye));
+      expect(peer.frames.last, Message.bye('au revoir'));
       client.destroy(); // le pair ferme à son tour
       expect(await closed, 'au revoir');
     });
 
     test('bye reçu : la connexion se termine avec son motif', () async {
-      final conn = PeerConnection.accepted(accepted, Message.hello(newId(), 'Moi', 1));
-      client.add(encode(Message.hello(newId(), 'Pair', 2)));
+      final conn = serve();
+      await peer.handshake();
+      peer.send(Message.hello(newId(), 'Pair', 2));
       await waitUntil(() => conn.isReady);
       final closed = next(conn.closed);
-      client.add(encode(Message.bye('à demain')));
+      peer.send(Message.bye('à demain'));
       await client.flush();
       await client.close();
       expect(await closed, 'à demain');
     });
   });
+
+  group('clés de sécurité', () {
+    test('le premier contact épingle les deux clés', () async {
+      final alice = await messengers.make('Alice');
+      final bob = await messengers.make('Bob');
+      await link(alice, bob);
+      expect(alice.store.contact(bob.userId)!.publicKey, encodeKey(bob.identity.public));
+      expect(bob.store.contact(alice.userId)!.publicKey, encodeKey(alice.identity.public));
+      expect(alice.contactKey(bob.userId), bob.identity.public);
+    });
+
+    test('une clé changée est refusée jusqu’à acceptation', () async {
+      final alice = await messengers.make('Alice');
+      final bob = await messengers.make('Bob');
+      final bobId = bob.userId;
+      await link(alice, bob);
+      final gone = next(alice.presenceChanged);
+      bob.stop();
+      await gone;
+
+      final impostorKeys = noise.KeyPair.generate();
+      final impostor = await messengers.make('Bob', userId: bobId, identity: impostorKeys);
+      final record = alice.send(bobId, 'secret');
+      final refused = <(String, bool)>[];
+      impostor.keyRefused.connect(refused.add);
+      final errors = <String>[];
+      impostor.error.connect(errors.add);
+      final changed = next(alice.keyChanged);
+      impostor.addContact('127.0.0.1', alice.port!);
+      expect(await changed, bobId);
+      await waitUntil(() => refused.isNotEmpty);
+      expect(refused, [(alice.userId, true)]);
+      expect(errors, [keyRefusedError]);
+      final contact = alice.store.contact(bobId)!;
+      expect(contact.publicKey, encodeKey(bob.identity.public));
+      expect(contact.pendingKey, encodeKey(impostorKeys.public));
+      expect(impostor.store.messages(alice.userId), isEmpty); // rien n'a fui
+      expect(status(alice, record.id), Status.pending);
+
+      alice.store.upsertContact(bobId, 'Bob', host: '127.0.0.1', port: impostor.port);
+      final added = next(impostor.messageAdded);
+      alice.trustNewKey(bobId);
+      expect((await added).text, 'secret');
+      await waitUntil(() => refused.last == (alice.userId, false));
+      expect(alice.store.contact(bobId)!.publicKey, encodeKey(impostorKeys.public));
+      expect(alice.store.contact(bobId)!.pendingKey, isNull);
+    });
+
+    test('une annonce ne renomme pas un contact vérifié', () async {
+      final alice = await messengers.make('Alice');
+      final bob = await messengers.make('Bob');
+      await link(alice, bob);
+      alice.onPeerSeen(bob.userId, 'Usurpateur', '127.0.0.1', bob.port!);
+      expect(alice.store.contact(bob.userId)!.name, 'Bob');
+    });
+
+    test('code de sécurité identique à Python (vecteurs partagés)', () {
+      final vectors =
+          jsonDecode(File('test/fixtures/protocol_vectors.json').readAsStringSync()) as Map<String, dynamic>;
+      expect(base64.decode(vectors['prologue'] as String), noise.prologue);
+      for (final raw in vectors['safety_numbers'] as List<dynamic>) {
+        final entry = raw as Map<String, dynamic>;
+        expect(safetyNumber(base64.decode(entry['a'] as String), base64.decode(entry['b'] as String)), entry['number']);
+      }
+    });
+  });
+}
+
+/// Initiateur Noise minimal au-dessus d'une [Socket] de test.
+class _NoiseClient {
+  _NoiseClient(this.socket) {
+    socket.listen((data) {
+      for (final message in reader.feed(data)) {
+        if (state.complete) {
+          frames.addAll(decoder.feed(state.receive!.decrypt(const [], message)));
+        } else {
+          raw.add(message);
+        }
+      }
+    });
+  }
+
+  final Socket socket;
+  final noise.KeyPair keys = noise.KeyPair.generate();
+  late final noise.HandshakeState state = noise.HandshakeState(true, keys, prologue: noise.prologue);
+  final noise.FrameReader reader = noise.FrameReader();
+  final FrameDecoder decoder = FrameDecoder();
+  final List<Uint8List> raw = [];
+  final List<Message> frames = [];
+
+  Future<Uint8List> nextRaw() async {
+    await waitUntil(() => raw.isNotEmpty);
+    return raw.removeAt(0);
+  }
+
+  Future<void> handshake() async {
+    socket.add(noise.frame(state.writeMessage()));
+    state.readMessage(await nextRaw());
+    socket.add(noise.frame(state.writeMessage()));
+  }
+
+  void send(Message message) => sendRaw(encode(message));
+
+  void sendRaw(List<int> plaintext) => socket.add(noise.encryptStream(state.send!, plaintext));
 }

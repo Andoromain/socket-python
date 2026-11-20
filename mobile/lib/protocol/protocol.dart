@@ -1,4 +1,4 @@
-// Protocole d'échange de Socket Chat (version 3), identique à
+// Protocole d'échange de Socket Chat (version 4), identique à
 // src/socket_chat/protocol.py côté PC.
 //
 // Trame TCP : objet JSON UTF-8 sur une ligne, terminé par « \n ».
@@ -12,7 +12,7 @@ import 'dart:typed_data';
 
 import 'package:uuid/uuid.dart';
 
-const int protocolVersion = 3;
+const int protocolVersion = 4;
 const int defaultPort = 12800;
 const int discoveryPort = 12801;
 
