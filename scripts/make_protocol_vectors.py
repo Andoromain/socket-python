@@ -223,8 +223,7 @@ def build() -> dict[str, object]:
         "announce_invalid": [_b64(d) for d in ANNOUNCE_INVALID],
         "prologue": _b64(PROLOGUE),
         "safety_numbers": [
-            {"a": _b64(a), "b": _b64(b), "number": safety_number(a, b)}
-            for a, b in SAFETY_KEYS
+            {"a": _b64(a), "b": _b64(b), "number": safety_number(a, b)} for a, b in SAFETY_KEYS
         ],
     }
 

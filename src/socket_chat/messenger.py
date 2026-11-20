@@ -54,12 +54,12 @@ NETWORK_ERROR = (
 #: Clé présentée différente de la clé épinglée : connexion refusée.
 KEY_REASON = "key"
 KEY_ERROR = (
-    "La clé de sécurité de ce contact a changé : connexion refusée. Vérifiez avec lui "
-    "(réinstallation ?) puis acceptez la nouvelle clé dans sa conversation."
+    "La clé de sécurité de ce contact a changé : connexion refusée. Vérifiez avec cette "
+    "personne (réinstallation ?) puis acceptez la nouvelle clé dans votre conversation."
 )
 KEY_REFUSED_ERROR = (
     "Ce contact a refusé la connexion : il connaît une autre clé de sécurité pour ce "
-    "poste. Il doit accepter votre nouvelle clé dans votre conversation."
+    "poste. Votre nouvelle clé doit être acceptée de son côté, dans votre conversation."
 )
 
 _ACK_TO_STATUS = {AckStatus.DELIVERED: Status.DELIVERED, AckStatus.READ: Status.READ}
