@@ -10,6 +10,7 @@ import getpass
 
 from PySide6.QtCore import QByteArray, QSettings
 
+from .netpolicy import Network, parse_networks
 from .protocol import DEFAULT_PORT, MAX_NAME_LENGTH, is_valid_id, new_id, validate_name
 from .updater import DEFAULT_UPDATE_URL
 
@@ -70,6 +71,14 @@ class Settings:
     def remember_host(self, host: str) -> None:
         hosts = [h for h in self.recent_hosts if h != host]
         self._store.setValue("network/recent_hosts", [host, *hosts][:MAX_RECENT_HOSTS])
+
+    @property
+    def allowed_networks(self) -> list[Network]:
+        """Réseaux autorisés (clé d'administration, voir ``netpolicy``) ; vide : tous."""
+        value = self._store.value("network/allowed_networks", "")
+        if isinstance(value, (list, tuple)):  # liste INI ou REG_MULTI_SZ
+            return parse_networks([str(v) for v in value])
+        return parse_networks(str(value or ""))
 
     # -- Mises à jour ------------------------------------------------------
     # Ces clés peuvent aussi être fixées par l'administrateur pour tous les utilisateurs

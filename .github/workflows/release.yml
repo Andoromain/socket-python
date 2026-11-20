@@ -1,7 +1,7 @@
 name: Release
 
 # Construit l'installeur Windows, l'archive Linux et l'APK Android signé, puis le
-# manifeste de mise à jour (latest.json).
+# manifeste de mise à jour (latest.json) signé (latest.json.sig).
 # - Pull request touchant au packaging : construction et vérification seulement.
 # - Lancement manuel : fichiers disponibles dans l'onglet « Artifacts » de l'exécution.
 # - Tag vX.Y.Z : Release dans ce dépôt (public), consultée par la mise à jour automatique.
@@ -17,8 +17,9 @@ on:
       - "src/socket_chat/updater.py"
       - "mobile/android/**"
 
+# Lecture seule par défaut : seul le job « publish » peut écrire (création de la Release).
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   check:
@@ -159,6 +160,22 @@ jobs:
           python scripts/make_latest.py --dist dist ${TAG:+--tag "$TAG"}
           cat dist/latest.json
           python -c "import json; print(json.load(open('dist/latest.json', encoding='utf-8'))['notes'])" > notes.md
+      # Sans signature valide, les postes refusent la mise à jour : un tag l'exige.
+      - name: Signature de latest.json
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+          IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        run: |
+          if [ -z "$UPDATE_SIGNING_KEY" ]; then
+            if [ "$IS_TAG" = "true" ]; then
+              echo "::error title=Clé de signature absente::Secret UPDATE_SIGNING_KEY introuvable : les postes refuseraient cette mise à jour. Ajoutez-le (README, « Publier une version »), puis « Re-run failed jobs »."
+              exit 1
+            fi
+            echo "::warning title=Manifeste non signé::Secret UPDATE_SIGNING_KEY absent : latest.json n'est pas signé (essai seulement)."
+            exit 0
+          fi
+          pip install "cryptography>=42"
+          python scripts/sign_manifest.py dist/latest.json
       - uses: actions/upload-artifact@v4
         with:
           name: release-files
@@ -170,6 +187,8 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: manifest
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:

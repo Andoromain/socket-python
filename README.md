@@ -144,9 +144,14 @@ converti automatiquement si le format change.
 
 ### Mise à jour automatique
 
-À chaque tag `vX.Y.Z`, le workflow **Release** publie les installeurs, l'APK et le
-manifeste `latest.json` dans les **Releases de ce dépôt** (public). Aucun réglage n'est
-nécessaire.
+À chaque tag `vX.Y.Z`, le workflow **Release** publie les installeurs, l'APK, le
+manifeste `latest.json` et sa signature `latest.json.sig` dans les **Releases de ce
+dépôt** (public). Aucun réglage n'est nécessaire sur les postes.
+
+Les postes n'installent une mise à jour que si `latest.json` est **signé avec la clé de
+Socket Chat** (Ed25519) : la clé privée est un secret du dépôt, la clé publique est
+intégrée à l'application (`src/socket_chat/signing.py`). Un compte GitHub piraté ou un
+dossier réseau modifié ne peut donc pas faire installer un faux programme.
 
 Les postes lisent
 `https://github.com/Andoromain/socket-python/releases/latest/download/latest.json`
@@ -160,9 +165,10 @@ ou, pour tout le monde, dans `HKEY_LOCAL_MACHINE\Software\SocketChat\SocketChat`
 |---|---|
 | `update/url` | Autre source : adresse HTTPS, dossier réseau (`\\serveur\logiciels\socket-chat`) ou chemin local contenant `latest.json` et les installeurs |
 | `update/enabled` | `false` pour désactiver la mise à jour automatique |
+| `network/allowed_networks` | Réseaux avec lesquels Socket Chat accepte de parler, par exemple `10.20.0.0/16, 192.168.1.0/24` : connexions et annonces venant d'ailleurs ignorées (portable sur un Wi-Fi d'hôtel ou à domicile). Vide : aucune restriction |
 
-Pour un dossier réseau, y copier les fichiers de la Release (installeurs et
-`latest.json`) tels quels.
+Pour un dossier réseau, y copier les fichiers de la Release (installeurs, `latest.json`
+et `latest.json.sig`) **tels quels** : un manifeste modifié ou sans signature est refusé.
 
 ## Utilisation
 
@@ -228,13 +234,20 @@ Conçu pour un **réseau interne de confiance** :
 - Sur **Wi-Fi**, les échanges non chiffrés sont plus exposés qu'en filaire : n'utiliser
   l'application Android que sur le Wi-Fi interne protégé (WPA2/WPA3 entreprise), jamais
   sur un réseau invité ou public.
-- Mise à jour automatique : uniquement en HTTPS (ou depuis un dossier), version
-  strictement plus récente, taille et empreinte SHA-256 vérifiées avant toute exécution.
-  La confiance repose sur le compte GitHub qui publie : protégez-le (double
+- Mise à jour automatique : uniquement en HTTPS (ou depuis un dossier), manifeste
+  **signé** (Ed25519, clé publique intégrée à l'application), version strictement plus
+  récente, taille et empreinte SHA-256 vérifiées avant toute exécution. Gardez la clé
+  privée (`UPDATE_SIGNING_KEY`) hors du dépôt et protégez le compte GitHub (double
   authentification).
+- Réseaux autorisés : l'administrateur peut limiter Socket Chat aux réseaux de
+  l'entreprise (`network/allowed_networks`, voir « Mise à jour automatique » pour
+  l'emplacement des réglages). Sur un réseau extérieur, le poste n'accepte alors plus
+  aucune connexion ni annonce.
 - Les données reçues sont validées : taille limitée (10 000 caractères par message,
   64 Kio par trame), JSON strict, texte affiché sans interprétation HTML. Toute donnée
   invalide coupe la connexion.
+- Signaler une faille : voir [SECURITY.md](SECURITY.md) (signalement privé, pas d'issue
+  publique).
 - Fichiers : rien n'est écrit sur le disque sans acceptation ; le nom proposé est
   nettoyé (aucun chemin, aucun caractère interdit sous Windows) et l'utilisateur choisit
   l'emplacement. Un fichier reçu n'est jamais ouvert automatiquement : traitez les
@@ -371,6 +384,11 @@ L'ordre compte : **le numéro de version change dans le code avant le tag**.
    téléphones). **Conservez la clé en lieu sûr** : GitHub ne permet pas de relire un
    secret, et sans elle plus aucune mise à jour Android n'est possible sans
    désinstaller.
+   Le manifeste `latest.json` est signé avec le secret `UPDATE_SIGNING_KEY` (clé
+   Ed25519 en base64). Sans lui, ou s'il ne correspond pas à la clé publique de
+   `src/socket_chat/signing.py`, la publication s'arrête. Nouvelle paire de clés :
+   `python scripts/sign_manifest.py --generate` (ajouter la nouvelle clé publique à
+   `TRUSTED_KEYS` et publier une version **avant** de signer avec la nouvelle clé).
 2. Fusionner la PR.
 3. Créer et pousser le tag correspondant, depuis `main` à jour :
    ```bash

@@ -6,6 +6,16 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
+@pytest.fixture(autouse=True)
+def update_key(monkeypatch):
+    """Remplace la clé publique de l'application par celle des tests (update_keys.py)."""
+    from update_keys import PUBLIC_KEY
+
+    from socket_chat import signing
+
+    monkeypatch.setattr(signing, "TRUSTED_KEYS", (PUBLIC_KEY,))
+
+
 @pytest.fixture
 def make_messenger(qtbot):
     """Crée des Messenger démarrés (port libre) et les détruit en fin de test.

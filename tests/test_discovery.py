@@ -114,3 +114,16 @@ def test_discovery_feeds_messenger(qtbot, make_messenger):
     for d in (alice_disc, bob_disc):
         d.stop()
         d.deleteLater()
+
+
+def test_announces_outside_allowed_networks_are_ignored(qtbot, pair, monkeypatch):
+    alice, bob = pair
+    monkeypatch.setattr(discovery_module, "is_allowed", lambda address, networks: not networks)
+    bob.allowed_networks = ["10.20.0.0/16"]
+    seen = []
+    bob.peer_seen.connect(lambda *args: seen.append(args))
+    alice.announce()
+    with qtbot.waitSignal(alice.peer_seen, timeout=TIMEOUT):
+        bob.announce()  # témoin : les annonces circulent bien (Alice ne filtre pas)
+    qtbot.wait(100)
+    assert seen == [] and bob.peers == []

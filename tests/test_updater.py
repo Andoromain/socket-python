@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QUrl
+from update_keys import sign_manifest
 
 from socket_chat import updater
 from socket_chat.updater import (
@@ -109,6 +110,7 @@ def make_repo(tmp_path: Path, version: str, payload: bytes, *, tamper: bool = Fa
         "assets": {"linux-x86_64": {"name": name, "size": len(payload), "sha256": digest}},
     }
     (repo / "latest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    sign_manifest(repo / "latest.json")
     return repo
 
 
@@ -209,3 +211,120 @@ def test_cleanup_downloads(tmp_path):
     unrelated.mkdir()
     assert updater.cleanup_downloads(tmp_path) == 1
     assert not old.exists() and unrelated.exists()
+
+
+# -- Signature du manifeste ----------------------------------------------------------
+def test_signature_url_targets_the_exact_version():
+    assert updater.signature_url(URL, "9.9.9") == (
+        "https://github.com/o/r/releases/download/v9.9.9/latest.json.sig"
+    )
+    assert (
+        updater.signature_url("https://intranet/maj/canal%20stable.json", "1.0.0")
+        == "https://intranet/maj/canal%20stable.json.sig"
+    )
+    assert updater.signature_url("file:///srv/maj/latest.json", "1.0.0") == (
+        "file:///srv/maj/latest.json.sig"
+    )
+
+
+def test_signature_verification():
+    from update_keys import PRIVATE_KEY
+
+    from socket_chat import signing
+
+    data = manifest_bytes()
+    signature = signing.sign(data, PRIVATE_KEY)
+    signing.verify(data, signature)
+    signing.verify(data, (signature + "\n").encode())  # fichier .sig avec retour à la ligne
+    other = signing.generate_private_key()
+    bad_cases = [
+        (data + b" ", signature),  # manifeste modifié
+        (data, signing.sign(data, other)),  # autre clé
+        (data, "pas du base64 !"),
+        (data, "AAAA"),  # longueur invalide
+        (data, "A" * 2000),  # trop gros
+        (data, ""),
+    ]
+    for payload, sig in bad_cases:
+        with pytest.raises(signing.SignatureError):
+            signing.verify(payload, sig)
+    # Rotation : une seconde clé de confiance est acceptée.
+    signing.verify(data, signing.sign(data, other), (signing.public_key_of(other),))
+
+
+@pytest.mark.parametrize("case", ["absente", "modifiee", "autre_cle", "illisible"])
+def test_checker_refuses_unsigned_or_forged_manifest(qtbot, tmp_path, case):
+    from socket_chat import signing
+
+    repo = make_repo(tmp_path, "9.9.9", b"contenu")
+    manifest = repo / "latest.json"
+    sig = repo / "latest.json.sig"
+    if case == "absente":
+        sig.unlink()
+    elif case == "modifiee":
+        # Un attaquant remplace l'empreinte de l'installeur par celle du sien.
+        payload = json.loads(manifest.read_text())
+        payload["assets"]["linux-x86_64"]["sha256"] = "0" * 64
+        manifest.write_text(json.dumps(payload))
+    elif case == "autre_cle":
+        sign_manifest(manifest, signing.generate_private_key())
+    else:
+        sig.write_text("n'importe quoi")
+    checker = UpdateChecker(str(repo), "3.2.0")
+    available = []
+    checker.update_available.connect(available.append)
+    with qtbot.waitSignal(checker.failed, timeout=TIMEOUT) as blocker:
+        checker.check_now()
+    assert not available and checker.latest is None
+    if case != "absente":
+        assert "signature invalide" in blocker.args[0]
+
+
+def test_sign_manifest_script(tmp_path, monkeypatch, capsys):
+    import importlib.util
+
+    from update_keys import PRIVATE_KEY
+
+    spec = importlib.util.spec_from_file_location(
+        "sign_manifest", Path(__file__).parents[1] / "scripts" / "sign_manifest.py"
+    )
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+
+    manifest = tmp_path / "latest.json"
+    manifest.write_bytes(manifest_bytes())
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.delenv("UPDATE_SIGNING_KEY", raising=False)
+    assert script.main([str(manifest)]) == 1  # clé absente
+
+    from socket_chat import signing
+
+    monkeypatch.setenv("UPDATE_SIGNING_KEY", signing.generate_private_key())
+    assert script.main([str(manifest)]) == 1  # clé qui ne correspond pas à l'application
+    assert not (tmp_path / "latest.json.sig").exists()
+
+    monkeypatch.setenv("UPDATE_SIGNING_KEY", PRIVATE_KEY)
+    assert script.main([str(manifest)]) == 0
+    signing.verify(manifest.read_bytes(), (tmp_path / "latest.json.sig").read_text())
+
+    assert script.main(["--generate"]) == 0
+    assert "Clé publique" in capsys.readouterr().out
+
+
+def test_embedded_public_key_is_valid():
+    """La clé publique livrée avec l'application est bien une clé Ed25519."""
+    import ast
+
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+    from socket_chat import signing
+
+    tree = ast.parse(Path(signing.__file__).read_text(encoding="utf-8"))
+    (keys,) = [
+        ast.literal_eval(node.value)
+        for node in tree.body
+        if isinstance(node, ast.AnnAssign) and getattr(node.target, "id", "") == "TRUSTED_KEYS"
+    ]
+    assert keys
+    for key in keys:
+        Ed25519PublicKey.from_public_bytes(signing._decode(key, 32, "Clé publique"))

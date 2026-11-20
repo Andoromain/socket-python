@@ -1,8 +1,19 @@
 # Journal des modifications
 
-## 3.3.2
+## 3.4.0
 
-Compatible avec la 3.3 (même protocole).
+Compatible avec la 3.3 (même protocole) : les postes en 3.3 et en 3.4 communiquent.
+
+### Sécurité
+- **Mises à jour signées** : l'application n'installe une mise à jour que si son
+  manifeste `latest.json` est signé avec la clé de Socket Chat (Ed25519,
+  `latest.json.sig`). Un compte GitHub piraté, un miroir ou un dossier réseau modifié
+  ne peut plus faire installer un faux programme.
+- **Réseaux autorisés** : l'administrateur peut limiter Socket Chat aux réseaux de
+  l'entreprise (réglage `network/allowed_networks`) ; ailleurs, le poste ignore
+  connexions et annonces.
+- Workflows GitHub en lecture seule par défaut, mises à jour de sécurité des
+  dépendances (Dependabot), procédure de signalement des failles (`SECURITY.md`).
 
 ### Modifié
 - La mise à jour automatique lit désormais les Releases du dépôt du projet
@@ -12,7 +23,7 @@ Compatible avec la 3.3 (même protocole).
 
 ### À savoir
 - Les postes en 3.3.1 ou avant cherchent encore les mises à jour dans l'ancien dépôt :
-  installez une fois la 3.3.2 à la main, les suivantes arriveront automatiquement.
+  installez une fois la 3.4.0 à la main, les suivantes arriveront automatiquement.
 
 ## 3.3.1
 

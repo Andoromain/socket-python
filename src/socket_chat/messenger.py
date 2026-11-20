@@ -16,6 +16,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtNetwork import QHostAddress, QTcpServer, QTcpSocket
 
 from .discovery import Discovery
+from .netpolicy import Network, is_allowed
 from .network import PeerConnection
 from .protocol import (
     MAX_EMOJI_LENGTH,
@@ -43,6 +44,11 @@ RETRY_INTERVAL_MS = 30_000
 DUPLICATE_REASON = "duplicate"
 SELF_REASON = "self"
 SELF_ERROR = "Cette adresse est celle de votre propre poste."
+NETWORK_REASON = "network"
+NETWORK_ERROR = (
+    "Ce poste est hors des réseaux autorisés par l'administrateur "
+    "(réglage network/allowed_networks)."
+)
 
 _ACK_TO_STATUS = {AckStatus.DELIVERED: Status.DELIVERED, AckStatus.READ: Status.READ}
 
@@ -74,6 +80,8 @@ class Messenger(QObject):
         # Envois en attente d'une connexion : réactions et refus de fichiers.
         self._pending_reactions: dict[str, dict[str, str]] = {}
         self._pending_declines: dict[str, set[str]] = {}
+        #: Réseaux autorisés (``netpolicy``) ; liste vide : aucune restriction.
+        self.allowed_networks: list[Network] = []
 
         self.transfers = FileTransfers(store, self)
         self.transfers.changed.connect(self._on_transfer_changed)
@@ -333,7 +341,13 @@ class Messenger(QObject):
         assert self._server is not None
         while self._server.hasPendingConnections():
             socket = self._server.nextPendingConnection()
-            log.info("Connexion entrante de %s", socket.peerAddress().toString())
+            address = socket.peerAddress().toString()
+            if not is_allowed(address, self.allowed_networks):
+                log.warning("Connexion refusée : %s hors des réseaux autorisés", address)
+                socket.abort()
+                socket.deleteLater()
+                continue
+            log.info("Connexion entrante de %s", address)
             self._watch(PeerConnection(socket, self._hello(), outgoing=False, parent=self))
 
     def _watch(self, conn: PeerConnection) -> None:
@@ -349,6 +363,13 @@ class Messenger(QObject):
         self._manual.discard(conn)
         if self._dialing.get(peer_id) is conn:
             del self._dialing[peer_id]
+        if not is_allowed(conn.peer_address, self.allowed_networks):
+            # Connexion sortante vers un nom d'hôte résolu hors des réseaux autorisés.
+            log.warning("Connexion fermée : %s hors des réseaux autorisés", conn.peer_address)
+            conn.abort(NETWORK_REASON)
+            if manual:
+                self.error.emit(NETWORK_ERROR)
+            return
         if peer_id == self.user_id:
             log.info("Connexion à soi-même ignorée")
             conn.close(SELF_REASON)

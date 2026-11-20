@@ -213,3 +213,37 @@ def test_new_address_replaces_stale_connection_attempt(qtbot, make_messenger):
     assert blocker.args[0].id == record.id
     black_hole.close()
     black_hole.deleteLater()
+
+
+@pytest.fixture
+def strict_networks(monkeypatch):
+    """Toute adresse est « extérieure » dès qu'une liste de réseaux est fixée.
+
+    La boucle locale étant toujours permise par netpolicy, on simule ici des postes
+    situés hors des réseaux autorisés.
+    """
+    monkeypatch.setattr(messenger_module, "is_allowed", lambda address, networks: not networks)
+    return ["10.20.0.0/16"]
+
+
+def test_incoming_connection_outside_allowed_networks_is_refused(
+    qtbot, make_messenger, strict_networks
+):
+    alice, bob = make_messenger("Alice"), make_messenger("Bob")
+    bob.allowed_networks = strict_networks
+    with qtbot.waitSignal(alice.error, timeout=TIMEOUT) as blocker:
+        alice.add_contact("127.0.0.1", bob.port)
+    assert "Impossible de joindre" in blocker.args[0]
+    assert alice.store.contacts() == [] and bob.store.contacts() == []
+
+
+def test_outgoing_connection_outside_allowed_networks_is_closed(
+    qtbot, make_messenger, strict_networks
+):
+    alice, bob = make_messenger("Alice"), make_messenger("Bob")
+    alice.allowed_networks = strict_networks
+    with qtbot.waitSignal(alice.error, timeout=TIMEOUT) as blocker:
+        alice.add_contact("127.0.0.1", bob.port)
+    assert blocker.args[0] == messenger_module.NETWORK_ERROR
+    qtbot.wait(200)
+    assert alice.store.contacts() == [] and not alice.is_online(bob.user_id)

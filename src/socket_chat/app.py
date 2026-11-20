@@ -112,6 +112,10 @@ def main(argv: list[str] | None = None) -> int:
     settings = Settings()
     store = Store(data_dir / "history.sqlite3")
     messenger = Messenger(store, settings.user_id, settings.name)
+    allowed_networks = settings.allowed_networks
+    if allowed_networks:
+        log.info("Réseaux autorisés : %s", ", ".join(map(str, allowed_networks)))
+    messenger.allowed_networks = allowed_networks
     messenger.error.connect(lambda text: log.warning("%s", text))
     if not messenger.start(settings.port):
         QMessageBox.critical(
@@ -125,6 +129,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     discovery = Discovery(settings.user_id, settings.name, messenger.port or settings.port)
+    discovery.allowed_networks = allowed_networks
     if discovery.start():
         messenger.attach_discovery(discovery)
     else:
