@@ -39,12 +39,13 @@ class MemoryPreferenceStore implements PreferenceStore {
 
 /// Préférences de l'appareil : identifiant stable, clé, nom affiché, port d'écoute.
 class Settings {
-  Settings._(this._prefs, this.userId, this.identity, this.name, this.port);
+  Settings._(this._prefs, this.userId, this.identity, this.name, this.port, this.allowedNetworks);
 
   static const _userIdKey = 'user_id';
   static const _nameKey = 'name';
   static const _portKey = 'port';
   static const _identityKey = 'identity_key';
+  static const _networksKey = 'allowed_networks';
 
   final PreferenceStore _prefs;
 
@@ -59,6 +60,10 @@ class Settings {
   String? name;
   int port;
 
+  /// Réseaux autorisés choisis sur l'appareil (CIDR séparés par des virgules ; vide :
+  /// aucune restriction). Une configuration gérée par l'administrateur l'emporte.
+  String allowedNetworks;
+
   static Future<Settings> load(PreferenceStore prefs, [SecretStore? secrets]) async {
     var userId = await prefs.getString(_userIdKey);
     if (!isValidId(userId)) {
@@ -72,6 +77,7 @@ class Settings {
       await _loadIdentity(prefs, secrets ?? MemorySecretStore()),
       await prefs.getString(_nameKey),
       port != null && port > 0 && port < 65536 ? port : defaultPort,
+      await prefs.getString(_networksKey) ?? '',
     );
   }
 
@@ -90,5 +96,6 @@ class Settings {
     final value = name;
     if (value != null) await _prefs.setString(_nameKey, value);
     await _prefs.setInt(_portKey, port);
+    await _prefs.setString(_networksKey, allowedNetworks);
   }
 }

@@ -23,9 +23,16 @@ temps que sur les postes.
   manifeste `latest.json` est signé avec la clé de Socket Chat (Ed25519,
   `latest.json.sig`). Un compte GitHub piraté, un miroir ou un dossier réseau modifié
   ne peut plus faire installer un faux programme.
+- **Historique chiffré sur le disque** : texte des messages, noms et chemins des
+  fichiers, aperçus d'images. La clé est protégée par Windows (DPAPI) sur PC et par
+  Android Keystore sur téléphone. L'historique existant est chiffré au premier lancement,
+  puis compacté. La clé du poste (`identity.key`) est elle aussi protégée par DPAPI.
 - **Réseaux autorisés** : l'administrateur peut limiter Socket Chat aux réseaux de
-  l'entreprise (réglage `network/allowed_networks`) ; ailleurs, le poste ignore
+  l'entreprise (PC : réglage `network/allowed_networks` ; Android : configuration
+  gérée par MDM, ou Préférences de l'application) ; ailleurs, l'appareil ignore
   connexions et annonces.
+- Android : sauvegardes de l'application désactivées (l'historique et les clés restent
+  sur le téléphone).
 - Workflows GitHub en lecture seule par défaut, mises à jour de sécurité des
   dépendances (Dependabot), procédure de signalement des failles (`SECURITY.md`).
 
@@ -39,8 +46,11 @@ temps que sur les postes.
 - Les postes en 3.x ne se mettent pas à jour seuls vers la 4.0 (ils cherchent dans
   l'ancien dépôt des installeurs) : installez une fois la 4.0 à la main. Les versions
   suivantes arriveront automatiquement.
-- L'historique est conservé ; au premier échange en 4.0, la clé de chaque collègue est
-  mémorisée. Comparez ensuite le code de sécurité avec vos collègues proches.
+- L'historique est conservé (et chiffré au premier lancement) ; au premier échange en
+  4.0, la clé de chaque collègue est mémorisée. Comparez ensuite le code de sécurité
+  avec vos collègues proches.
+- Ne copiez pas le profil Socket Chat d'un poste à un autre : l'historique chiffré n'y
+  serait pas lisible (il est alors mis de côté, jamais effacé).
 
 ## 3.3.1
 

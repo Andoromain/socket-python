@@ -18,6 +18,7 @@ import '../store/store.dart';
 import 'connection.dart';
 import 'discovery.dart';
 import 'identity.dart';
+import 'netpolicy.dart';
 import 'noise.dart' as noise;
 import 'transfers.dart';
 
@@ -33,6 +34,10 @@ int retryIntervalMs = 30000;
 const String duplicateReason = 'duplicate';
 const String selfReason = 'self';
 const String selfError = 'Cette adresse est celle de votre propre appareil.';
+const String networkReason = 'network';
+const String networkError =
+    'Cet appareil est hors des réseaux autorisés (réglage « Réseaux autorisés » ou '
+    'configuration de votre administrateur).';
 
 /// Clé présentée différente de la clé épinglée : connexion refusée.
 const String keyReason = 'key';
@@ -100,6 +105,13 @@ class Messenger {
   final Set<PeerConnection> _manual = {}; // ajouts par adresse (erreurs affichées)
   final Set<PeerConnection> _manualReady = {}; // ajouts par adresse, identifiés
   final Set<String> _refusedBy = {}; // contacts qui refusent notre clé (déjà signalés)
+
+  /// Réseaux autorisés (netpolicy.dart) ; liste vide : aucune restriction.
+  List<Network> allowedNetworks = const [];
+
+  /// Règle d'adresse (remplaçable dans les tests, où tout passe par la boucle locale).
+  @visibleForTesting
+  bool Function(String address, List<Network> networks) addressPolicy = isAllowed;
   final Set<String> _discovered = {};
   final Map<String, Timer> _typingTimers = {};
   final Set<String> _typing = {}; // contacts en train d'écrire
@@ -401,6 +413,10 @@ class Messenger {
   }
 
   void _onNewConnection(RawSocket socket) {
+    if (!addressPolicy(socket.remoteAddress.address, allowedNetworks)) {
+      socket.close();
+      return;
+    }
     _watch(PeerConnection.accepted(socket, _hello(), identity));
   }
 
@@ -416,6 +432,12 @@ class Messenger {
     _pending.remove(conn);
     final manual = _manual.remove(conn);
     if (_dialing[peerId] == conn) _dialing.remove(peerId);
+    if (!addressPolicy(conn.peerAddress, allowedNetworks)) {
+      // Connexion sortante vers un nom d'hôte résolu hors des réseaux autorisés.
+      conn.abort(networkReason);
+      if (manual) error.emit(networkError);
+      return;
+    }
     final key = conn.peerKey;
     if (peerId == userId || key == null || _sameBytes(key, identity.public)) {
       conn.close(selfReason);

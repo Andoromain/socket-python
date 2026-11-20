@@ -1,6 +1,7 @@
 package io.github.andoajpr2.socket_chat_mobile
 
 import android.content.Context
+import android.content.RestrictionsManager
 import android.net.wifi.WifiManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -13,6 +14,9 @@ import java.net.NetworkInterface
  *
  * Android ignore le broadcast UDP reçu tant qu'aucune application ne détient un verrou
  * multicast Wi-Fi : sans lui, les postes du réseau ne seraient jamais détectés.
+ *
+ * Lit aussi la configuration gérée par l'administrateur (MDM, voir
+ * res/xml/app_restrictions.xml) : réseaux autorisés.
  */
 class MainActivity : FlutterActivity() {
     private var multicastLock: WifiManager.MulticastLock? = null
@@ -31,6 +35,7 @@ class MainActivity : FlutterActivity() {
                         result.success(null)
                     }
                     "broadcastAddresses" -> result.success(broadcastAddresses())
+                    "managedAllowedNetworks" -> result.success(managedAllowedNetworks())
                     else -> result.notImplemented()
                 }
             }
@@ -53,6 +58,14 @@ class MainActivity : FlutterActivity() {
     private fun releaseMulticastLock() {
         multicastLock?.let { if (it.isHeld) it.release() }
         multicastLock = null
+    }
+
+    /** Réseaux autorisés fixés par l'administrateur (configuration gérée), ou null. */
+    private fun managedAllowedNetworks(): String? = try {
+        val manager = getSystemService(Context.RESTRICTIONS_SERVICE) as RestrictionsManager
+        manager.applicationRestrictions.getString("allowed_networks")?.takeIf { it.isNotBlank() }
+    } catch (_: Exception) {
+        null
     }
 
     /** Adresses de diffusion réelles (masque de sous-réseau compris) des réseaux IPv4. */

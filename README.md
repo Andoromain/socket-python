@@ -228,11 +228,23 @@ Options en ligne de commande : `socket-chat --version`, `socket-chat --debug`
 | Préférences | registre `HKCU\Software\SocketChat` | `~/.config/SocketChat/SocketChat.conf` |
 | Historique | `%LOCALAPPDATA%\SocketChat\SocketChat\history.sqlite3` | `~/.local/share/SocketChat/SocketChat/history.sqlite3` |
 | Journal | `%LOCALAPPDATA%\SocketChat\SocketChat\socket-chat.log` | `~/.local/share/SocketChat/SocketChat/socket-chat.log` |
-| Clé du poste (chiffrement) | `%LOCALAPPDATA%\SocketChat\SocketChat\identity.key` | `~/.local/share/SocketChat/SocketChat/identity.key` |
+| Clé du poste (chiffrement des échanges) | `%LOCALAPPDATA%\SocketChat\SocketChat\identity.key` | `~/.local/share/SocketChat/SocketChat/identity.key` |
+| Clé de l'historique | `%LOCALAPPDATA%\SocketChat\SocketChat\history.key` | `~/.local/share/SocketChat/SocketChat/history.key` |
 
-La clé du poste est créée au premier lancement et prouve l'identité du poste à ses
-correspondants. Ne la copiez pas sur un autre poste. Si elle est supprimée, une nouvelle
-est créée : vos collègues verront « La clé de sécurité a changé » et devront l'accepter.
+Les deux clés sont créées au premier lancement. Sous Windows, elles sont chiffrées par
+Windows (DPAPI) avec la session de l'utilisateur : copiées sur un autre poste ou lues
+depuis un autre compte, elles sont inutilisables. Sous Linux, elles ne sont lisibles que
+par l'utilisateur (droits 600).
+
+- Ne copiez pas ces fichiers sur un autre poste. Si `identity.key` est supprimée, une
+  nouvelle est créée : vos collègues verront « La clé de sécurité a changé » et devront
+  l'accepter.
+- Si `history.key` est perdue (ou le profil restauré sur un autre poste), l'historique
+  ne peut plus être déchiffré : il est mis de côté sous le nom
+  `history-illisible.sqlite3` (jamais effacé) et un nouvel historique commence.
+
+Sur Android, la clé de l'appareil et celle de l'historique sont gardées par Android
+Keystore, et les sauvegardes Android sont désactivées pour l'application.
 
 ## Sécurité
 
@@ -254,18 +266,29 @@ réseau de l'entreprise.
 - Ce qui reste visible sur le réseau : les annonces de présence (nom affiché, port) et
   le fait que deux postes communiquent, pas le contenu. Le nom d'un contact déjà vérifié
   ne peut pas être modifié par une annonce.
-- L'historique est stocké **en clair** dans le profil de l'utilisateur (sur Android,
-  dans l'espace privé de l'application) : protégez l'accès aux postes (session
-  verrouillée, chiffrement du disque type BitLocker).
+- **Historique chiffré sur le disque** : le texte des messages, le nom et le chemin des
+  fichiers et les aperçus d'images sont chiffrés (ChaCha20-Poly1305) avec la clé de
+  l'historique, protégée par DPAPI sous Windows et par Android Keystore sur téléphone.
+  Chaque valeur est liée à son message : elle ne peut être ni modifiée ni déplacée sans
+  être détectée. Un historique existant est chiffré au premier lancement de la 4.0 puis
+  compacté, pour qu'aucune ancienne donnée en clair ne reste dans le fichier. Restent
+  lisibles les contacts, les dates et les états des messages. Sous Linux, la clé est
+  protégée par les droits du fichier : chiffrez le disque (LUKS) pour vous protéger du
+  vol. Les fichiers reçus sont enregistrés tels quels, là où l'utilisateur l'a choisi.
 - Mise à jour automatique : uniquement en HTTPS (ou depuis un dossier), manifeste
   **signé** (Ed25519, clé publique intégrée à l'application), version strictement plus
   récente, taille et empreinte SHA-256 vérifiées avant toute exécution. Gardez la clé
   privée (`UPDATE_SIGNING_KEY`) hors du dépôt et protégez le compte GitHub (double
   authentification).
 - Réseaux autorisés : l'administrateur peut limiter Socket Chat aux réseaux de
-  l'entreprise (`network/allowed_networks`, voir « Mise à jour automatique » pour
-  l'emplacement des réglages). Sur un réseau extérieur, le poste n'accepte alors plus
-  aucune connexion ni annonce.
+  l'entreprise. Sur un réseau extérieur, l'appareil n'accepte alors plus aucune
+  connexion ni annonce.
+  - **PC** : clé `network/allowed_networks` (voir « Mise à jour automatique » pour
+    l'emplacement des réglages).
+  - **Android** : configuration gérée par la console de gestion des appareils (MDM :
+    Intune, Workspace ONE, Google…), clé `allowed_networks`. À défaut, l'utilisateur
+    peut la fixer lui-même dans les **Préférences** ; une configuration de
+    l'administrateur l'emporte et verrouille le champ.
 - Les données reçues sont validées : taille limitée (10 000 caractères par message,
   64 Kio par trame), JSON strict, texte affiché sans interprétation HTML. Toute donnée
   invalide coupe la connexion.

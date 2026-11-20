@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../app/controller.dart';
+import '../net/netpolicy.dart';
 import '../protocol/protocol.dart';
 import '../version.dart';
 
@@ -18,6 +19,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _form = GlobalKey<FormState>();
   late final TextEditingController _name = TextEditingController(text: widget.controller.settings.name);
   late final TextEditingController _port = TextEditingController(text: '${widget.controller.settings.port}');
+  late final TextEditingController _networks = TextEditingController(text: widget.controller.allowedNetworks);
   late final Future<List<String>> _addresses = widget.controller.localAddresses();
   bool _saving = false;
 
@@ -25,13 +27,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void dispose() {
     _name.dispose();
     _port.dispose();
+    _networks.dispose();
     super.dispose();
   }
 
   Future<void> _save() async {
     if (!_form.currentState!.validate()) return;
     setState(() => _saving = true);
-    await widget.controller.applySettings(name: _name.text, port: int.parse(_port.text.trim()));
+    await widget.controller.applySettings(
+      name: _name.text,
+      port: int.parse(_port.text.trim()),
+      allowedNetworks: widget.controller.managedNetworks == null ? _networks.text : null,
+    );
     if (!mounted) return;
     setState(() => _saving = false);
     final error = widget.controller.startError;
@@ -73,6 +80,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 final port = int.tryParse((value ?? '').trim());
                 return port == null || port < 1 || port > 65535 ? 'Port entre 1 et 65535.' : null;
               },
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              key: const Key('allowed-networks'),
+              controller: _networks,
+              enabled: controller.managedNetworks == null,
+              decoration: InputDecoration(
+                labelText: 'Réseaux autorisés',
+                hintText: 'ex. 10.20.0.0/16, 192.168.1.0/24',
+                helperText: controller.managedNetworks != null
+                    ? 'Fixé par votre administrateur.'
+                    : "Facultatif : l'application ignore les autres réseaux (Wi-Fi public, domicile…).",
+                helperMaxLines: 2,
+                border: const OutlineInputBorder(),
+              ),
+              validator: networksError,
             ),
             const SizedBox(height: 24),
             FilledButton(onPressed: _saving ? null : _save, child: Text(_saving ? 'Enregistrement…' : 'Enregistrer')),
@@ -119,6 +142,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
   }
+}
+
+/// Message d'erreur pour une liste de réseaux invalide, ou `null`.
+String? networksError(String? value) {
+  final entries = (value ?? '').replaceAll(';', ',').split(',').where((e) => e.trim().isNotEmpty).toList();
+  final parsed = parseNetworks(value ?? '');
+  return parsed.length == entries.length ? null : 'Format attendu : 10.20.0.0/16, 192.168.1.0/24';
 }
 
 /// Message d'erreur pour un nom invalide, ou `null`.
