@@ -1,10 +1,24 @@
 # Journal des modifications
 
-## 3.4.0
+## 4.0.0
 
-Compatible avec la 3.3 (même protocole) : les postes en 3.3 et en 3.4 communiquent.
+**Nouveau protocole (version 4) : tous les postes et téléphones doivent être mis à
+jour.** Un poste en 4.0 ne communique pas avec un poste en 3.x ; il reconnaît
+l'ancienne version et l'explique. Installez la 4.0 sur les téléphones (APK) en même
+temps que sur les postes.
 
 ### Sécurité
+- **Chiffrement de bout en bout** : chaque connexion commence par une poignée de main
+  Noise (`Noise_XX_25519_ChaChaPoly_SHA256`) ; messages, accusés, réactions et fichiers
+  sont chiffrés et authentifiés. Une écoute du réseau, Wi-Fi compris, ne révèle plus
+  leur contenu, et une donnée modifiée en route coupe la connexion.
+- **Clé de sécurité par poste** : chaque poste et téléphone a sa propre clé, prouvée à
+  chaque connexion. La clé d'un collègue est mémorisée au premier échange ; une autre
+  clé est ensuite refusée et signalée par un bandeau « La clé de sécurité a changé »,
+  avec **Accepter la nouvelle clé…** après vérification.
+- **Code de sécurité** (bouton 🔒 dans la conversation) : à comparer avec le collègue
+  pour s'assurer que personne ne s'intercale.
+- Une annonce sur le réseau ne peut plus renommer un contact vérifié.
 - **Mises à jour signées** : l'application n'installe une mise à jour que si son
   manifeste `latest.json` est signé avec la clé de Socket Chat (Ed25519,
   `latest.json.sig`). Un compte GitHub piraté, un miroir ou un dossier réseau modifié
@@ -22,8 +36,11 @@ Compatible avec la 3.3 (même protocole) : les postes en 3.3 et en 3.4 communiqu
 - Le code est distribué sous licence MIT.
 
 ### À savoir
-- Les postes en 3.3.1 ou avant cherchent encore les mises à jour dans l'ancien dépôt :
-  installez une fois la 3.4.0 à la main, les suivantes arriveront automatiquement.
+- Les postes en 3.x ne se mettent pas à jour seuls vers la 4.0 (ils cherchent dans
+  l'ancien dépôt des installeurs) : installez une fois la 4.0 à la main. Les versions
+  suivantes arriveront automatiquement.
+- L'historique est conservé ; au premier échange en 4.0, la clé de chaque collègue est
+  mémorisée. Comparez ensuite le code de sécurité avec vos collègues proches.
 
 ## 3.3.1
 

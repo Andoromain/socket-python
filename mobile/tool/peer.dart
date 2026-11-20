@@ -12,15 +12,17 @@
 //   {"cmd": "react", "id": "<message>", "emoji": "👍"}
 //   {"cmd": "typing", "to": "<id>", "active": true}
 //   {"cmd": "discover", "target_port": 45678}
+//   {"cmd": "safety", "contact": "<id>"}
 //   {"cmd": "quit"}
 // Événements (une ligne JSON par événement sur la sortie standard) : started,
-// presence, message, status, changed, typing, error, result, discovery.
+// presence, message, status, changed, typing, error, result, discovery, safety.
 
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:socket_chat_mobile/net/discovery.dart';
+import 'package:socket_chat_mobile/net/identity.dart';
 import 'package:socket_chat_mobile/net/messenger.dart';
 import 'package:socket_chat_mobile/protocol/protocol.dart';
 import 'package:socket_chat_mobile/store/store.dart';
@@ -56,7 +58,7 @@ Future<void> main(List<String> args) async {
   messenger.error.connect((message) => emit('error', {'message': message}));
 
   if (!await messenger.start(0)) exit(1);
-  emit('started', {'id': messenger.userId, 'port': messenger.port});
+  emit('started', {'id': messenger.userId, 'port': messenger.port, 'key': encodeKey(messenger.identity.public)});
 
   final done = Completer<void>();
   final lines = stdin.transform(utf8.decoder).transform(const LineSplitter());
@@ -95,6 +97,14 @@ Future<void> main(List<String> args) async {
             discovery = d;
             emit('discovery', {'port': d.localPort});
             d.announce();
+          case 'safety':
+            final contact = command['contact']! as String;
+            final key = messenger.contactKey(contact);
+            emit('safety', {
+              'contact': contact,
+              'key': key == null ? null : encodeKey(key),
+              'number': key == null ? null : safetyNumber(messenger.identity.public, key),
+            });
           case 'quit':
             if (!done.isCompleted) done.complete();
           default:
