@@ -89,6 +89,7 @@ class Messenger(QObject):
     avatar_changed = Signal(str)  # contact dont la photo de profil a changé
     call_frame = Signal(str, object)  # contact, trame d'appel (voir calls.py)
     peer_disconnected = Signal(str)  # la connexion avec ce contact vient de se fermer
+    peer_connected = Signal(str)  # connexion avec ce contact établie et identifiée
     error = Signal(str)
 
     def __init__(
@@ -553,6 +554,7 @@ class Messenger(QObject):
             conn.send(Message.file_answer(message_id, False))
         if self._avatar:
             conn.send(Message.avatar(self._avatar))
+        self.peer_connected.emit(peer_id)
 
     def _on_message(self, conn: PeerConnection, message: Message) -> None:
         peer_id = conn.peer_id

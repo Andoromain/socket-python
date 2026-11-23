@@ -3,7 +3,8 @@
 //
 // Le média circule directement entre les deux appareils (WebRTC, voir
 // lib/calls/webrtc_engine.dart) ; ce module ne fait que la signalisation, par la
-// connexion déjà établie avec le contact.
+// connexion chiffrée avec le contact (ouverte au besoin : un collègue seulement détecté
+// sur le réseau est d'abord joint).
 
 import 'dart:async';
 
@@ -12,7 +13,8 @@ import '../protocol/protocol.dart';
 import '../store/store.dart';
 import 'messenger.dart';
 
-/// Délais (ms) : accusé de sonnerie, sonnerie, établissement de la liaison média.
+/// Délais (ms) : connexion au contact, accusé de sonnerie, sonnerie, liaison média.
+int dialTimeoutMs = 12000;
 int ringingAckTimeoutMs = 6000;
 int ringTimeoutMs = 30000;
 int connectTimeoutMs = 20000;
@@ -79,6 +81,9 @@ class Call {
   /// Appel vidéo : caméra coupée.
   bool cameraOff = false;
 
+  /// Invitation pas encore envoyée : connexion au contact en cours d'ouverture.
+  bool dialing = false;
+
   bool get video => media == 'video';
   MediaEngine? engine;
 
@@ -91,6 +96,7 @@ class CallManager {
   CallManager(this._messenger, this._engineFactory) {
     _messenger.callFrame.connect((frame) => _onFrame(frame.$1, frame.$2));
     _messenger.peerDisconnected.connect(_onDisconnected);
+    _messenger.peerConnected.connect(_onConnected);
   }
 
   final Messenger _messenger;
@@ -111,16 +117,34 @@ class CallManager {
   // -- Actions locales ---------------------------------------------------
   Call startCall(String contactId, [String media = 'audio']) {
     if (call != null) throw StateError('Un appel est déjà en cours.');
-    if (!_messenger.isConnected(contactId)) {
-      final name = _messenger.store.contact(contactId)?.name ?? 'Ce contact';
-      throw StateError("$name n'est pas en ligne : appel impossible.");
+    final connected = _messenger.isConnected(contactId);
+    final contact = _messenger.store.contact(contactId);
+    if (!connected && (contact == null || contact.host == null || contact.port == null)) {
+      throw StateError("${contact?.name ?? 'Ce contact'} n'est pas en ligne : appel impossible.");
     }
-    final current = Call(newId(), contactId, media, true, CallState.calling);
+    final current = Call(newId(), contactId, media, true, CallState.calling)..dialing = !connected;
     call = current;
-    _messenger.sendTo(contactId, Message.callInvite(current.id, media));
-    _arm(ringingAckTimeoutMs);
+    if (connected) {
+      _sendInvite(current);
+    } else {
+      // Collègue seulement détecté : la connexion est ouverte d'abord, l'invitation part
+      // dès qu'elle est prête (_onConnected).
+      _messenger.connectTo(contactId);
+      _arm(dialTimeoutMs);
+    }
     stateChanged.emit(current);
     return current;
+  }
+
+  void _sendInvite(Call current) {
+    current.dialing = false;
+    _messenger.sendTo(current.contactId, Message.callInvite(current.id, current.media));
+    _arm(ringingAckTimeoutMs);
+  }
+
+  void _onConnected(String contactId) {
+    final current = call;
+    if (current != null && current.dialing && current.contactId == contactId) _sendInvite(current);
   }
 
   void accept() {
@@ -304,6 +328,13 @@ class CallManager {
     final current = call;
     if (current == null) return;
     switch (current.state) {
+      case CallState.calling when current.dialing:
+        final name = _messenger.store.contact(current.contactId)?.name ?? 'Le correspondant';
+        error.emit(
+          '$name est injoignable : appel impossible. Vérifiez que Socket Chat est ouvert '
+          'sur son appareil.',
+        );
+        _finish(CallOutcome.failed);
       case CallState.calling:
         // Aucun accusé de sonnerie : version trop ancienne chez le correspondant.
         _messenger.sendTo(current.contactId, Message.callEnd(current.id, hangupReason));

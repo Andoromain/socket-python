@@ -188,4 +188,37 @@ void main() {
     expect(call.cameraOff, isFalse);
     alice.hangup();
   });
+
+  test('collègue seulement détecté : la connexion est ouverte avant l’appel (régression)', () async {
+    final c = await messengers.make('Claire');
+    final d = await messengers.make('David');
+    final claire = CallManager(c, FakeEngine.new);
+    final david = CallManager(d, FakeEngine.new);
+    c.onPeerSeen(d.userId, 'David', '127.0.0.1', d.port!);
+    expect(c.isOnline(d.userId) && !c.isConnected(d.userId), isTrue);
+    final incoming = next(david.incomingCall);
+    final call = claire.startCall(d.userId);
+    expect(call.state, CallState.calling);
+    expect(await incoming, (c.userId, 'audio'));
+    await waitUntil(() => claire.call?.state == CallState.ringingOut);
+    david.accept();
+    await waitUntil(() => claire.call?.state == CallState.active && david.call?.state == CallState.active);
+    claire.hangup();
+    await waitUntil(() => claire.call == null && david.call == null);
+  });
+
+  test('collègue injoignable : échec expliqué', () async {
+    dialTimeoutMs = 300;
+    addTearDown(() => dialTimeoutMs = 12000);
+    final c = await messengers.make('Claire');
+    final claire = CallManager(c, FakeEngine.new);
+    const ghost = '22222222-2222-4222-8222-222222222222';
+    c.onPeerSeen(ghost, 'Fantôme', '127.0.0.1', 1); // port fermé : connexion impossible
+    final error = next(claire.error);
+    final ended = next(claire.callEnded);
+    claire.startCall(ghost);
+    expect(await error, contains('injoignable'));
+    expect(await ended, (ghost, CallOutcome.failed));
+    expect(claire.call, isNull);
+  });
 }

@@ -262,3 +262,45 @@ def test_camera_ignored_for_audio_calls(qtbot, phones):
     alice.set_camera_enabled(False)
     assert not alice.call.camera_off
     alice.hangup()
+
+
+# -- Collègue seulement détecté (aucune connexion encore ouverte) ---------------------------
+@pytest.fixture
+def discovered(qtbot, make_messenger):
+    """Alice voit Bob par la détection (point vert), sans avoir encore échangé avec lui."""
+    FakeEngine.instances.clear()
+    a, b = make_messenger("Alice"), make_messenger("Bob")
+    alice = CallManager(a, FakeEngine, parent=a)
+    bob = CallManager(b, FakeEngine, parent=b)
+    a.on_peer_seen(b.user_id, "Bob", "127.0.0.1", b.port)
+    assert a.is_online(b.user_id) and not a.is_connected(b.user_id)
+    return alice, bob
+
+
+def test_call_to_discovered_contact_connects_first(qtbot, discovered):
+    """Régression : « Bob n'est pas en ligne : appel impossible » alors qu'il l'était."""
+    alice, bob = discovered
+    with qtbot.waitSignal(bob.incoming_call, timeout=TIMEOUT) as blocker:
+        call = alice.start_call(ids(bob))
+    assert call.state is CallState.CALLING and blocker.args == [ids(alice), "audio"]
+    qtbot.waitUntil(lambda: alice.call.state is CallState.RINGING_OUT, timeout=TIMEOUT)
+    bob.accept()
+    qtbot.waitUntil(lambda: alice.call and alice.call.state is CallState.ACTIVE, timeout=TIMEOUT)
+    qtbot.waitUntil(lambda: bob.call and bob.call.state is CallState.ACTIVE, timeout=TIMEOUT)
+    alice.hangup()
+    qtbot.waitUntil(lambda: alice.call is None and bob.call is None, timeout=TIMEOUT)
+
+
+def test_call_to_unreachable_contact_fails_with_message(qtbot, make_messenger, monkeypatch):
+    monkeypatch.setattr(calls_module, "DIAL_TIMEOUT_MS", 300)
+    a = make_messenger("Alice")
+    alice = CallManager(a, FakeEngine, parent=a)
+    ghost = "22222222-2222-4222-8222-222222222222"
+    a.on_peer_seen(ghost, "Fantôme", "127.0.0.1", 1)  # port fermé : connexion impossible
+    errors, ended = [], []
+    alice.error.connect(errors.append)
+    alice.call_ended.connect(lambda *args: ended.append(args))
+    alice.start_call(ghost)
+    qtbot.waitUntil(lambda: alice.call is None, timeout=TIMEOUT)
+    assert ended == [(ghost, CallOutcome.FAILED.value)]
+    assert errors and "injoignable" in errors[0]

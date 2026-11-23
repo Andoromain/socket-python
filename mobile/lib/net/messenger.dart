@@ -111,6 +111,9 @@ class Messenger {
 
   /// La connexion avec ce contact vient de se fermer.
   final Signal<String> peerDisconnected = Signal();
+
+  /// Connexion avec ce contact établie et identifiée.
+  final Signal<String> peerConnected = Signal();
   final Signal<String> error = Signal();
 
   RawServerSocket? _server;
@@ -544,6 +547,7 @@ class Messenger {
       conn.send(Message.fileAnswer(messageId, false));
     }
     if (_avatar.isNotEmpty) conn.send(Message.avatar(_avatar));
+    peerConnected.emit(peerId);
   }
 
   void _onMessage(PeerConnection conn, Message message) {

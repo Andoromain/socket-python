@@ -1,5 +1,17 @@
 # Journal des modifications
 
+## 4.1.1
+
+Compatible avec la 4.1 (même protocole).
+
+### Corrigé
+- **Appels audio et vidéo** : appeler un collègue affiché en ligne mais avec qui aucun
+  message n'avait encore été échangé depuis le démarrage échouait (« … n'est pas en
+  ligne : appel impossible »). La connexion est maintenant ouverte d'abord, puis l'appel
+  part (PC et Android). Si le collègue est injoignable, un message l'explique.
+- Le journal (`socket-chat --debug`) note le déroulement des appels : début, sonnerie,
+  connexion, fin et sa raison.
+
 ## 4.1.0
 
 Réunit les deux lignées de Socket Chat : les nouveautés des versions 3.4 à 3.8 (photo

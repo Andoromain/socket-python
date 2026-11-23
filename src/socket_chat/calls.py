@@ -1,8 +1,9 @@
 """Appels audio (et vidéo) entre deux postes : signalisation et déroulement.
 
 Le média circule directement entre les deux appareils (WebRTC, voir ``call_engine.py``
-sur PC) ; ce module ne fait que la signalisation, par la connexion déjà établie avec le
-contact :
+sur PC) ; ce module ne fait que la signalisation, par la connexion chiffrée avec le
+contact (ouverte au besoin : un collègue seulement détecté sur le réseau est d'abord
+joint) :
 
 1. l'appelant envoie ``call_invite`` ; l'appelé répond ``call_ringing`` et sonne ;
 2. s'il décroche (``call_accept``), l'appelant crée l'offre WebRTC (``call_sdp`` offer),
@@ -31,7 +32,8 @@ from .store import CallInfo, CallOutcome
 
 log = logging.getLogger(__name__)
 
-#: Délais (ms) : accusé de sonnerie, sonnerie, établissement de la liaison média.
+#: Délais (ms) : connexion au contact, accusé de sonnerie, sonnerie, liaison média.
+DIAL_TIMEOUT_MS = 12_000
 RINGING_ACK_TIMEOUT_MS = 6_000
 RING_TIMEOUT_MS = 30_000
 CONNECT_TIMEOUT_MS = 20_000
@@ -86,6 +88,8 @@ class Call:
     started: float | None = None  # début de la conversation (time.monotonic)
     muted: bool = False
     camera_off: bool = False  # appel vidéo : caméra coupée
+    #: Invitation pas encore envoyée : connexion au contact en cours d'ouverture.
+    dialing: bool = False
     engine: MediaEngine | None = field(default=None, repr=False)
 
     @property
@@ -119,21 +123,39 @@ class CallManager(QObject):
         self._timer.timeout.connect(self._on_timeout)
         messenger.call_frame.connect(self._on_frame)
         messenger.peer_disconnected.connect(self._on_disconnected)
+        messenger.peer_connected.connect(self._on_connected)
 
     # -- Actions locales ---------------------------------------------------
     def start_call(self, contact_id: str, media: str = "audio") -> Call:
         if self.call is not None:
             raise ValueError("Un appel est déjà en cours.")
-        if not self._messenger.is_connected(contact_id):
-            contact = self._messenger.store.contact(contact_id)
+        connected = self._messenger.is_connected(contact_id)
+        contact = self._messenger.store.contact(contact_id)
+        if not connected and (contact is None or not contact.host or not contact.port):
             name = contact.name if contact else "Ce contact"
             raise ValueError(f"{name} n'est pas en ligne : appel impossible.")
-        call = Call(new_id(), contact_id, media, True, CallState.CALLING)
+        call = Call(new_id(), contact_id, media, True, CallState.CALLING, dialing=not connected)
         self.call = call
-        self._messenger.send_to(contact_id, Message.call_invite(call.id, media))
-        self._arm(RINGING_ACK_TIMEOUT_MS)
+        log.info("Appel %s vers %s", media, contact.name if contact else contact_id)
+        if connected:
+            self._send_invite(call)
+        else:
+            # Collègue seulement détecté : la connexion est ouverte d'abord, l'invitation
+            # part dès qu'elle est prête (_on_connected).
+            self._messenger.connect_to(contact_id)
+            self._arm(DIAL_TIMEOUT_MS)
         self.state_changed.emit(call)
         return call
+
+    def _send_invite(self, call: Call) -> None:
+        call.dialing = False
+        self._messenger.send_to(call.contact_id, Message.call_invite(call.id, call.media))
+        self._arm(RINGING_ACK_TIMEOUT_MS)
+
+    def _on_connected(self, contact_id: str) -> None:
+        call = self.call
+        if call is not None and call.dialing and call.contact_id == contact_id:
+            self._send_invite(call)
 
     def accept(self) -> None:
         call = self.call
@@ -233,6 +255,7 @@ class CallManager(QObject):
                 return
         call = Call(message.id, peer_id, message.media, False, CallState.INCOMING)
         self.call = call
+        log.info("Appel %s entrant", message.media)
         self._messenger.send_to(peer_id, Message.call_ringing(call.id))
         self._arm(RING_TIMEOUT_MS)
         self.state_changed.emit(call)
@@ -316,7 +339,16 @@ class CallManager(QObject):
         call = self.call
         if call is None:
             return
-        if call.state is CallState.CALLING:
+        if call.state is CallState.CALLING and call.dialing:
+            contact = self._messenger.store.contact(call.contact_id)
+            name = contact.name if contact else "Le correspondant"
+            log.warning("Appel impossible : %s injoignable", name)
+            self.error.emit(
+                f"{name} est injoignable : appel impossible. Vérifiez que Socket Chat est "
+                "ouvert sur son poste et que le pare-feu autorise le port de Socket Chat."
+            )
+            self._finish(CallOutcome.FAILED)
+        elif call.state is CallState.CALLING:
             # Aucun accusé de sonnerie : version trop ancienne chez le correspondant.
             self._messenger.send_to(call.contact_id, Message.call_end(call.id, HANGUP))
             self._finish(CallOutcome.UNSUPPORTED)
@@ -342,6 +374,7 @@ class CallManager(QObject):
             call.engine.deleteLater()
             call.engine = None
         duration = call.duration if outcome is CallOutcome.COMPLETED else 0
+        log.info("Appel %s terminé : %s (%d s)", call.media, outcome.value, duration)
         self._messenger.add_call_record(
             call.contact_id, call.outgoing, CallInfo(call.media, outcome, duration)
         )
@@ -351,6 +384,7 @@ class CallManager(QObject):
     def _set_state(self, state: CallState) -> None:
         assert self.call is not None
         self.call.state = state
+        log.info("Appel : %s", state.value)
         self.state_changed.emit(self.call)
 
     def _arm(self, ms: int) -> None:
