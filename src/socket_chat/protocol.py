@@ -27,6 +27,8 @@ lignes.
 * ``{"type": "file_chunk", "id": "<uuid>", "offset": 0, "data": "<base64>"}`` : un bloc ;
 * ``{"type": "file_end", "id": "<uuid>", "sha256": "<hex>"}`` : fin et empreinte ;
 * ``{"type": "file_cancel", "id": "<uuid>", "reason": "..."}`` : abandon (des deux côtés) ;
+* ``{"type": "avatar", "data": "<base64>"}`` : photo de profil (JPEG, ``""`` la retire),
+  envoyée après la présentation et à chaque changement ;
 * ``{"type": "bye", "reason": "..."}`` : fermeture volontaire.
 
 Les trames d'un type inconnu sont ignorées : une version plus récente peut ajouter
@@ -68,6 +70,10 @@ MAX_FILE_SIZE = 2 * 1024**3
 CHUNK_SIZE = 32 * 1024
 #: Taille maximale de l'aperçu d'une image (octets, avant base64).
 MAX_THUMB_SIZE = 32 * 1024
+#: Taille maximale d'une photo de profil (octets, avant base64).
+MAX_AVATAR_SIZE = 32 * 1024
+#: Signature d'un fichier JPEG (seul format accepté pour les photos de profil).
+JPEG_MAGIC = b"\xff\xd8\xff"
 #: Longueur maximale d'un nom de fichier (caractères).
 MAX_FILE_NAME_LENGTH = 200
 #: Longueur maximale d'une réaction (caractères : un emoji composé peut en compter plusieurs).
@@ -89,6 +95,7 @@ class MessageType(StrEnum):
     FILE_CHUNK = "file_chunk"
     FILE_END = "file_end"
     FILE_CANCEL = "file_cancel"
+    AVATAR = "avatar"
     BYE = "bye"
 
 
@@ -198,6 +205,10 @@ class Message:
         return cls(MessageType.FILE_CANCEL, id=message_id, reason=reason)
 
     @classmethod
+    def avatar(cls, data: bytes) -> Message:
+        return cls(MessageType.AVATAR, data=data)
+
+    @classmethod
     def bye(cls, reason: str = "") -> Message:
         return cls(MessageType.BYE, reason=reason)
 
@@ -245,6 +256,8 @@ class Message:
                 return {"type": kind, "id": self.id, "sha256": self.sha256}
             case MessageType.FILE_CANCEL:
                 return {"type": kind, "id": self.id, "reason": self.reason}
+            case MessageType.AVATAR:
+                return {"type": kind, "data": base64.b64encode(self.data).decode("ascii")}
             case _:
                 return {"type": kind, "reason": self.reason}
 
@@ -422,6 +435,13 @@ def decode(line: bytes) -> Message | None:
         case MessageType.FILE_CANCEL:
             reason = _require_str(payload, "reason", max_length=500)
             return Message.file_cancel(_require_id(payload), reason)
+        case MessageType.AVATAR:
+            if "data" not in payload:
+                raise ProtocolError("Champ « data » absent.")
+            data = _require_base64(payload, "data", max_size=MAX_AVATAR_SIZE)
+            if data and not data.startswith(JPEG_MAGIC):
+                raise ProtocolError("Photo de profil invalide (JPEG attendu).")
+            return Message.avatar(data)
         case _:
             return Message.bye(_require_str(payload, "reason", max_length=500))
 

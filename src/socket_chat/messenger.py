@@ -107,6 +107,8 @@ class Messenger(QObject):
         self._pending_declines: dict[str, set[str]] = {}
         #: Réseaux autorisés (``netpolicy``) ; liste vide : aucune restriction.
         self.allowed_networks: list[Network] = []
+        #: Photo de profil de ce poste (JPEG), envoyée à chaque contact ; vide : aucune.
+        self._avatar = b""
 
         self.transfers = FileTransfers(store, self)
         self.transfers.changed.connect(self._on_transfer_changed)
@@ -317,6 +319,20 @@ class Messenger(QObject):
             return
         self._dialing[contact_id] = self._dial(contact.host, contact.port)
 
+    # -- Photo de profil ----------------------------------------------------
+    @property
+    def avatar(self) -> bytes:
+        return self._avatar
+
+    def set_avatar(self, avatar: bytes) -> None:
+        """Change la photo de ce poste et l'envoie aux contacts connectés (vide : retirée)."""
+        if avatar == self._avatar:
+            return
+        self._avatar = avatar
+        for conn in list(self._connections.values()):
+            if conn.is_ready:
+                conn.send(Message.avatar(avatar))
+
     # -- Clés des contacts --------------------------------------------------
     def _check_key(self, peer_id: str, key: bytes) -> bool:
         """Vrai si ``key`` est la clé épinglée du contact (ou s'il n'en a pas encore)."""
@@ -495,6 +511,8 @@ class Messenger(QObject):
             conn.send(Message.react(message_id, emoji))
         for message_id in self._pending_declines.pop(peer_id, set()):
             conn.send(Message.file_answer(message_id, False))
+        if self._avatar:
+            conn.send(Message.avatar(self._avatar))
 
     def _on_message(self, conn: PeerConnection, message: Message) -> None:
         peer_id = conn.peer_id
@@ -507,6 +525,9 @@ class Messenger(QObject):
         match message.type:
             case MessageType.CHAT | MessageType.FILE_OFFER:
                 self._receive_chat(conn, peer_id, message)
+            case MessageType.AVATAR:
+                if self.store.set_avatar(peer_id, message.data):
+                    self.contacts_changed.emit()
             case MessageType.REACT:
                 record = self.store.message(message.id)
                 if (

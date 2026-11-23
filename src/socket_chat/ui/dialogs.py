@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..protocol import MAX_NAME_LENGTH, validate_name
+from .profile import AvatarPicker
 
 
 def _port_spinbox(value: int, parent: QWidget) -> QSpinBox:
@@ -38,6 +39,8 @@ class SettingsDialog(QDialog):
         close_to_tray: bool = True,
         tray_available: bool = True,
         first_run: bool = False,
+        avatar: bytes = b"",
+        user_id: str = "",
     ):
         super().__init__(parent)
         self.setWindowTitle("Bienvenue" if first_run else "Préférences")
@@ -53,8 +56,12 @@ class SettingsDialog(QDialog):
         self.tray_check.setChecked(close_to_tray and tray_available)
         self.tray_check.setEnabled(tray_available)
 
+        self.avatar_picker = AvatarPicker(avatar, name, user_id, self)
+        self.name_edit.textChanged.connect(self.avatar_picker.set_name)
+
         form = QFormLayout()
         form.addRow("&Nom d'affichage :", self.name_edit)
+        form.addRow("P&hoto de profil :", self.avatar_picker)
         form.addRow("&Port :", self.port_spin)
         form.addRow(self.tray_check)
 
@@ -79,6 +86,10 @@ class SettingsDialog(QDialog):
     @property
     def port(self) -> int:
         return self.port_spin.value()
+
+    @property
+    def avatar(self) -> bytes:
+        return self.avatar_picker.avatar
 
     @property
     def close_to_tray(self) -> bool:

@@ -21,7 +21,7 @@ from pathlib import Path
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "bmp", "webp"}
 
@@ -66,12 +66,16 @@ _MIGRATIONS = {
     ALTER TABLE contacts ADD COLUMN public_key TEXT;
     ALTER TABLE contacts ADD COLUMN pending_key TEXT;
     """,
+    # 4.0.2 : photo de profil de chaque contact (JPEG reçu par la trame « avatar »).
+    4: """
+    ALTER TABLE contacts ADD COLUMN avatar BLOB;
+    """,
 }
 
 #: Colonnes attendues après les migrations : ajoutées si elles manquent (historique dans
 #: un état inattendu, par exemple après une coupure pendant une mise à niveau).
 _REQUIRED_COLUMNS = {
-    "contacts": {"public_key": "TEXT", "pending_key": "TEXT"},
+    "contacts": {"public_key": "TEXT", "pending_key": "TEXT", "avatar": "BLOB"},
     "messages": {
         "kind": "TEXT NOT NULL DEFAULT 'text'",
         "file_name": "TEXT",
@@ -196,6 +200,8 @@ class Contact:
     public_key: str | None = None
     #: Clé différente présentée par ce contact, refusée en attendant l'utilisateur.
     pending_key: str | None = None
+    #: Photo de profil (JPEG) ; vide : initiales.
+    avatar: bytes = b""
 
 
 @dataclass(frozen=True)
@@ -419,6 +425,15 @@ class Store:
             )
         return cursor.rowcount > 0
 
+    def set_avatar(self, contact_id: str, avatar: bytes) -> bool:
+        """Enregistre la photo de profil du contact ; vrai si elle a changé."""
+        with self._db:
+            cursor = self._db.execute(
+                "UPDATE contacts SET avatar = ? WHERE id = ? AND avatar IS NOT ?",
+                (avatar or None, contact_id, avatar or None),
+            )
+        return cursor.rowcount > 0
+
     def contact(self, contact_id: str) -> Contact | None:
         row = self._db.execute("SELECT * FROM contacts WHERE id = ?", (contact_id,)).fetchone()
         return _contact(row) if row else None
@@ -625,4 +640,5 @@ def _contact(row: sqlite3.Row) -> Contact:
         row["last_seen"],
         row["public_key"],
         row["pending_key"],
+        row["avatar"] or b"",
     )

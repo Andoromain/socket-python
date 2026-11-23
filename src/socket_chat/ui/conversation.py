@@ -679,7 +679,9 @@ class ConversationView(QWidget):
         if contact is None:
             return
         self.name_label.setText(contact.name)
-        self.avatar.setPixmap(avatar_pixmap(contact.name, contact.id, 40, self.devicePixelRatioF()))
+        self.avatar.setPixmap(
+            avatar_pixmap(contact.name, contact.id, 40, self.devicePixelRatioF(), contact.avatar)
+        )
         if self._messenger.is_typing(contact.id):
             status = "écrit…"
         elif self._messenger.is_online(contact.id):
