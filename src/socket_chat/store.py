@@ -68,6 +68,28 @@ _MIGRATIONS = {
     """,
 }
 
+#: Colonnes attendues après les migrations : ajoutées si elles manquent (historique dans
+#: un état inattendu, par exemple après une coupure pendant une mise à niveau).
+_REQUIRED_COLUMNS = {
+    "contacts": {"public_key": "TEXT", "pending_key": "TEXT"},
+    "messages": {
+        "kind": "TEXT NOT NULL DEFAULT 'text'",
+        "file_name": "TEXT",
+        "file_size": "INTEGER",
+        "file_state": "TEXT",
+        "file_path": "TEXT",
+        "thumb": "BLOB",
+    },
+}
+_REACTIONS_TABLE = """
+CREATE TABLE IF NOT EXISTS reactions (
+    message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    author     TEXT NOT NULL,
+    emoji      TEXT NOT NULL,
+    PRIMARY KEY (message_id, author)
+);
+"""
+
 #: Auteur des réactions de l'utilisateur local (les autres sont des identifiants de contact).
 ME = "me"
 
@@ -231,6 +253,7 @@ class Store:
             self._db.executescript(_SCHEMA)
         for target in range(max(version, 1) + 1, SCHEMA_VERSION + 1):
             self._db.executescript(f"BEGIN; {_MIGRATIONS[target]} COMMIT;")
+        self._repair_schema()
         self._db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self._cipher: _Cipher | None = None
         try:
@@ -247,6 +270,16 @@ class Store:
 
     def close(self) -> None:
         self._db.close()
+
+    def _repair_schema(self) -> None:
+        """Ajoute les colonnes et tables attendues qui manqueraient."""
+        with self._db:
+            for table, columns in _REQUIRED_COLUMNS.items():
+                present = {row[1] for row in self._db.execute(f"PRAGMA table_info({table})")}
+                for column, definition in columns.items():
+                    if column not in present:
+                        self._db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+            self._db.executescript(_REACTIONS_TABLE)
 
     # -- Chiffrement -------------------------------------------------------------
     @property

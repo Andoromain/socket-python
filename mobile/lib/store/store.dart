@@ -62,6 +62,20 @@ const Map<int, String> _migrations = {
   ''',
 };
 
+/// Colonnes attendues après les migrations : ajoutées si elles manquent (historique dans
+/// un état inattendu, par exemple après une coupure pendant une mise à niveau).
+const Map<String, Map<String, String>> _requiredColumns = {
+  'contacts': {'public_key': 'TEXT', 'pending_key': 'TEXT'},
+  'messages': {
+    'kind': "TEXT NOT NULL DEFAULT 'text'",
+    'file_name': 'TEXT',
+    'file_size': 'INTEGER',
+    'file_state': 'TEXT',
+    'file_path': 'TEXT',
+    'thumb': 'BLOB',
+  },
+};
+
 /// Auteur des réactions de l'utilisateur local (les autres sont des identifiants de contact).
 const String me = 'me';
 
@@ -259,6 +273,7 @@ class Store {
     for (var target = (version > 1 ? version : 1) + 1; target <= schemaVersion; target++) {
       _db.execute('BEGIN; ${_migrations[target]} COMMIT;');
     }
+    _repairSchema();
     _db.execute('PRAGMA user_version = $schemaVersion');
     try {
       _setupEncryption(key);
@@ -286,6 +301,23 @@ class Store {
   }
 
   void close() => _db.close();
+
+  /// Ajoute les colonnes et tables attendues qui manqueraient.
+  void _repairSchema() {
+    for (final MapEntry(key: table, value: columns) in _requiredColumns.entries) {
+      final present = {for (final row in _db.select('PRAGMA table_info($table)')) row['name'] as String};
+      for (final MapEntry(key: column, value: definition) in columns.entries) {
+        if (!present.contains(column)) _db.execute('ALTER TABLE $table ADD COLUMN $column $definition');
+      }
+    }
+    _db.execute('''
+      CREATE TABLE IF NOT EXISTS reactions (
+          message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+          author     TEXT NOT NULL,
+          emoji      TEXT NOT NULL,
+          PRIMARY KEY (message_id, author)
+      )''');
+  }
 
   @visibleForTesting
   void debugExecute(String sql, [List<Object?> parameters = const []]) => _db.execute(sql, parameters);
