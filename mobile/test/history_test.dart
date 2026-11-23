@@ -9,6 +9,7 @@ import 'package:socket_chat_mobile/app/history.dart';
 import 'package:socket_chat_mobile/app/secrets.dart';
 import 'package:socket_chat_mobile/app/settings.dart';
 import 'package:socket_chat_mobile/store/store.dart';
+import 'package:sqlite3/sqlite3.dart';
 
 const a = '11111111-1111-4111-8111-111111111111';
 const secret = 'Code du coffre : 4521';
@@ -147,5 +148,29 @@ void main() {
     expect(moved.values['identity_key'], base64.encode(List<int>.filled(32, 7)));
     expect(legacyPrefs.values['identity_key'], '');
     expect(settings.identity.private, List<int>.filled(32, 7));
+  });
+
+  test('colonnes manquantes réparées (régression 4.0.0)', () {
+    final path = '${tmp.path}/h.sqlite3';
+    final db = sqlite3.open(path);
+    db.execute('''
+      CREATE TABLE contacts (id TEXT PRIMARY KEY, name TEXT NOT NULL, host TEXT,
+                             port INTEGER, last_seen INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE messages (id TEXT PRIMARY KEY, contact_id TEXT NOT NULL,
+                             outgoing INTEGER NOT NULL, text TEXT NOT NULL,
+                             ts INTEGER NOT NULL, status TEXT NOT NULL);
+      PRAGMA user_version = 3;
+    ''');
+    db.execute("INSERT INTO contacts VALUES (?, 'Alice', NULL, NULL, 0)", [a]);
+    db.execute("INSERT INTO messages VALUES ('m1', ?, 0, 'ancien', 1, 'read')", [a]);
+    db.close();
+
+    final store = Store(path, key);
+    final summary = store.contacts().single;
+    expect(summary.contact.name, 'Alice');
+    expect(summary.contact.publicKey, isNull);
+    expect(summary.lastMessage!.text, 'ancien');
+    expect(store.setReaction('m1', me, '👍'), isTrue);
+    store.close();
   });
 }

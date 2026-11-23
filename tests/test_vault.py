@@ -91,3 +91,17 @@ def test_open_history_encrypts_and_recovers_from_lost_key(tmp_path):
     store, warning = open_history(tmp_path)  # clé illisible (autre poste)
     assert warning is not None and (tmp_path / "history-illisible.key").exists()
     store.close()
+
+
+def test_set_aside_moves_sqlite_journal(tmp_path):
+    """Le journal WAL de l'historique mis de côté ne doit pas être rejoué dans le nouveau."""
+    for name in ("history.sqlite3", "history.sqlite3-wal", "history.sqlite3-shm"):
+        (tmp_path / name).write_text(name)
+    target = vault.set_aside(tmp_path / "history.sqlite3")
+    assert target == tmp_path / "history-illisible.sqlite3"
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "history-illisible.sqlite3",
+        "history-illisible.sqlite3-shm",
+        "history-illisible.sqlite3-wal",
+    ]
+    assert (tmp_path / "history-illisible.sqlite3-wal").read_text() == "history.sqlite3-wal"

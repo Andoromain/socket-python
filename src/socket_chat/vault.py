@@ -146,5 +146,11 @@ def set_aside(path: str | Path, label: str = "illisible") -> Path | None:
         index += 1
         target = path.with_name(f"{path.stem}-{label}-{index}{path.suffix}")
     path.replace(target)
+    # Journal SQLite (-wal, -shm) de l'ancien fichier : déplacé avec lui, sinon SQLite
+    # le rejouerait dans le nouveau fichier créé à la même place.
+    for suffix in ("-wal", "-shm"):
+        companion = path.with_name(path.name + suffix)
+        if companion.exists():
+            companion.replace(target.with_name(target.name + suffix))
     log.warning("Fichier inutilisable mis de côté : %s", target)
     return target

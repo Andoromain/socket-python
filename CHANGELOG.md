@@ -1,5 +1,16 @@
 # Journal des modifications
 
+## 4.0.1
+
+Compatible avec la 4.0 (même protocole).
+
+### Corrigé
+- Socket Chat ne démarrait pas sur certains postes (« IndexError: No item with that
+  key ») : un historique auquel il manquait des colonnes est désormais réparé à
+  l'ouverture, sur PC comme sur Android.
+- Quand un historique illisible est mis de côté, son journal SQLite (`-wal`, `-shm`)
+  l'accompagne : il ne peut plus être rejoué dans le nouvel historique.
+
 ## 4.0.0
 
 **Nouveau protocole (version 4) : tous les postes et téléphones doivent être mis à

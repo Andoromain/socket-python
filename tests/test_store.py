@@ -293,3 +293,31 @@ def test_tampered_or_swapped_values_are_unreadable(tmp_path):
     db.commit()
     assert store.message(second.id).text == UNREADABLE
     assert store.message(first.id).text == SECRET
+
+
+def test_missing_columns_are_repaired(tmp_path):
+    """Régression 4.0.0 : historique en version 3 auquel il manque des colonnes."""
+    path = tmp_path / "h.sqlite3"
+    db = sqlite3.connect(path)
+    db.executescript(
+        """
+        CREATE TABLE contacts (id TEXT PRIMARY KEY, name TEXT NOT NULL, host TEXT,
+                               port INTEGER, last_seen INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE messages (id TEXT PRIMARY KEY, contact_id TEXT NOT NULL,
+                               outgoing INTEGER NOT NULL, text TEXT NOT NULL,
+                               ts INTEGER NOT NULL, status TEXT NOT NULL);
+        PRAGMA user_version = 3;
+        """
+    )
+    db.execute("INSERT INTO contacts VALUES (?, 'Alice', NULL, NULL, 0)", (A,))
+    db.execute("INSERT INTO messages VALUES ('m1', ?, 0, 'ancien', 1, 'read')", (A,))
+    db.commit()
+    db.close()
+
+    store = Store(path, KEY)
+    summary = store.contacts()[0]
+    assert summary.contact.name == "Alice" and summary.contact.public_key is None
+    assert summary.last_message.text == "ancien"
+    assert store.set_reaction("m1", ME, "👍")
+    store.pin_key(A, "clé")
+    assert store.contact(A).public_key == "clé"
