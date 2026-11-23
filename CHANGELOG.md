@@ -1,18 +1,5 @@
 # Journal des modifications
 
-## 4.0.2
-
-Compatible avec la 4.0 : un poste en 4.0.0 ou 4.0.1 ignore simplement les photos.
-
-### Ajouté
-- **Photo de profil** : Préférences › **Choisir une photo…** (PC) ou **Choisir une
-  photo** (Android). L'image est recadrée au centre et réduite (128 px), puis envoyée,
-  chiffrée, à vos collègues, qui la voient à la place de vos initiales dans la liste et
-  en haut de la conversation. **Retirer** revient aux initiales.
-
-### Corrigé
-- Fenêtre du code de sécurité : le texte n'est plus coupé (constaté sous GNOME).
-
 ## 4.0.1
 
 Compatible avec la 4.0 (même protocole).

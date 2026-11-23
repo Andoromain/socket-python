@@ -1,28 +1,16 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 
 import '../store/store.dart';
 import 'format.dart';
 
-/// Photo de profil, ou initiales de la même couleur que sur PC, avec point vert si en ligne.
+/// Avatar à initiales, de la même couleur que sur PC, avec point vert si en ligne.
 class Avatar extends StatelessWidget {
-  const Avatar({
-    super.key,
-    required this.name,
-    required this.contactId,
-    this.online = false,
-    this.size = 48,
-    this.photo,
-  });
+  const Avatar({super.key, required this.name, required this.contactId, this.online = false, this.size = 48});
 
   final String name;
   final String contactId;
   final bool online;
   final double size;
-
-  /// Photo de profil (JPEG) ; `null` ou vide : initiales.
-  final Uint8List? photo;
 
   @override
   Widget build(BuildContext context) {
@@ -31,20 +19,14 @@ class Avatar extends StatelessWidget {
       dimension: size,
       child: Stack(
         children: [
-          if (photo case final image? when image.isNotEmpty)
-            ClipOval(
-              child: Image.memory(
-                image,
-                width: size,
-                height: size,
-                fit: BoxFit.cover,
-                gaplessPlayback: true,
-                // Photo illisible : initiales.
-                errorBuilder: (_, _, _) => _Initials(name: name, contactId: contactId, size: size),
-              ),
-            )
-          else
-            _Initials(name: name, contactId: contactId, size: size),
+          CircleAvatar(
+            radius: size / 2,
+            backgroundColor: avatarColor(contactId),
+            child: Text(
+              initials(name),
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: size * 0.38),
+            ),
+          ),
           if (online)
             Positioned(
               right: 0,
@@ -66,24 +48,6 @@ class Avatar extends StatelessWidget {
       ),
     );
   }
-}
-
-class _Initials extends StatelessWidget {
-  const _Initials({required this.name, required this.contactId, required this.size});
-
-  final String name;
-  final String contactId;
-  final double size;
-
-  @override
-  Widget build(BuildContext context) => CircleAvatar(
-    radius: size / 2,
-    backgroundColor: avatarColor(contactId),
-    child: Text(
-      initials(name),
-      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: size * 0.38),
-    ),
-  );
 }
 
 /// État d'un message envoyé : horloge, ✓ (envoyé), ✓✓ (remis), ✓✓ colorées (lu).

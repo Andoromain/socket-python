@@ -109,21 +109,6 @@ class Messenger {
   /// Réseaux autorisés (netpolicy.dart) ; liste vide : aucune restriction.
   List<Network> allowedNetworks = const [];
 
-  Uint8List _avatar = Uint8List(0);
-
-  /// Photo de profil de cet appareil (JPEG), envoyée à chaque contact ; vide : aucune.
-  Uint8List get avatar => _avatar;
-
-  /// Change la photo et l'envoie aux contacts connectés (vide : retirée).
-  void setAvatar(List<int> avatar) {
-    final value = Uint8List.fromList(avatar);
-    if (_sameBytes(value, _avatar)) return;
-    _avatar = value;
-    for (final conn in _connections.values.toList()) {
-      if (conn.isReady) conn.send(Message.avatar(value));
-    }
-  }
-
   /// Règle d'adresse (remplaçable dans les tests, où tout passe par la boucle locale).
   @visibleForTesting
   bool Function(String address, List<Network> networks) addressPolicy = isAllowed;
@@ -497,7 +482,6 @@ class Messenger {
     for (final messageId in _pendingDeclines.remove(peerId) ?? <String>{}) {
       conn.send(Message.fileAnswer(messageId, false));
     }
-    if (_avatar.isNotEmpty) conn.send(Message.avatar(_avatar));
   }
 
   void _onMessage(PeerConnection conn, Message message) {
@@ -510,8 +494,6 @@ class Messenger {
     switch (message.type) {
       case MessageType.chat || MessageType.fileOffer:
         _receiveChat(conn, peerId, message);
-      case MessageType.avatar:
-        if (store.setAvatar(peerId, message.data ?? Uint8List(0))) contactsChanged.emit(null);
       case MessageType.react:
         final record = store.message(message.id);
         if (record != null && record.contactId == peerId && store.setReaction(message.id, peerId, message.emoji)) {

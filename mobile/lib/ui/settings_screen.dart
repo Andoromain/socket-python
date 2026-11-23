@@ -1,29 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:image_picker/image_picker.dart';
 
-import '../app/avatar.dart';
 import '../app/controller.dart';
 import '../net/netpolicy.dart';
 import '../protocol/protocol.dart';
 import '../version.dart';
-import 'widgets.dart';
-
-/// Choix d'une image dans la galerie (octets bruts), ou `null` si annulé.
-typedef PhotoPicker = Future<List<int>?> Function();
-
-Future<List<int>?> pickFromGallery() async {
-  final file = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: 1024, maxHeight: 1024);
-  return file?.readAsBytes();
-}
 
 /// Nom affiché, port d'écoute et informations utiles pour être ajouté par adresse.
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key, required this.controller, this.pickPhoto = pickFromGallery});
+  const SettingsScreen({super.key, required this.controller});
   final ChatController controller;
-
-  /// Choix de la photo de profil (remplaçable dans les tests).
-  final PhotoPicker pickPhoto;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -43,24 +29,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _port.dispose();
     _networks.dispose();
     super.dispose();
-  }
-
-  Future<void> _choosePhoto() async {
-    final messenger = ScaffoldMessenger.of(context);
-    final bytes = await widget.pickPhoto();
-    if (bytes == null) return;
-    final avatar = makeAvatar(bytes);
-    if (avatar.isEmpty) {
-      messenger.showSnackBar(const SnackBar(content: Text('Image illisible.')));
-      return;
-    }
-    await widget.controller.setAvatar(avatar);
-    if (mounted) setState(() {});
-  }
-
-  Future<void> _removePhoto() async {
-    await widget.controller.setAvatar(const []);
-    if (mounted) setState(() {});
   }
 
   Future<void> _save() async {
@@ -89,34 +57,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            Row(
-              children: [
-                Avatar(
-                  key: const Key('my-avatar'),
-                  name: controller.settings.name ?? controller.messenger.name,
-                  contactId: controller.settings.userId,
-                  size: 64,
-                  photo: controller.settings.avatar,
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Wrap(
-                    spacing: 8,
-                    runSpacing: 4,
-                    children: [
-                      OutlinedButton.icon(
-                        onPressed: _choosePhoto,
-                        icon: const Icon(Icons.photo_camera_outlined),
-                        label: const Text('Choisir une photo'),
-                      ),
-                      if (controller.settings.avatar.isNotEmpty)
-                        TextButton(onPressed: _removePhoto, child: const Text('Retirer')),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
             TextFormField(
               controller: _name,
               textCapitalization: TextCapitalization.words,

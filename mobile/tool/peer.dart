@@ -13,11 +13,9 @@
 //   {"cmd": "typing", "to": "<id>", "active": true}
 //   {"cmd": "discover", "target_port": 45678}
 //   {"cmd": "safety", "contact": "<id>"}
-//   {"cmd": "set_avatar", "data": "<base64>"}
-//   {"cmd": "contact", "id": "<id>"}
 //   {"cmd": "quit"}
 // Événements (une ligne JSON par événement sur la sortie standard) : started,
-// presence, message, status, changed, typing, error, result, discovery, safety, contact.
+// presence, message, status, changed, typing, error, result, discovery, safety.
 
 import 'dart:async';
 import 'dart:convert';
@@ -106,16 +104,6 @@ Future<void> main(List<String> args) async {
               'contact': contact,
               'key': key == null ? null : encodeKey(key),
               'number': key == null ? null : safetyNumber(messenger.identity.public, key),
-            });
-          case 'set_avatar':
-            messenger.setAvatar(base64.decode(command['data']! as String));
-          case 'contact':
-            final contact = store.contact(command['id']! as String);
-            final avatar = contact?.avatar;
-            emit('contact', {
-              'id': command['id'],
-              'name': contact?.name,
-              'avatar': avatar == null ? null : base64.encode(avatar),
             });
           case 'quit':
             if (!done.isCompleted) done.complete();

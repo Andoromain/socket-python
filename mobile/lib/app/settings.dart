@@ -1,6 +1,3 @@
-import 'dart:convert';
-import 'dart:typed_data';
-
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../net/noise.dart';
@@ -42,14 +39,13 @@ class MemoryPreferenceStore implements PreferenceStore {
 
 /// Préférences de l'appareil : identifiant stable, clé, nom affiché, port d'écoute.
 class Settings {
-  Settings._(this._prefs, this.userId, this.identity, this.name, this.port, this.allowedNetworks, this.avatar);
+  Settings._(this._prefs, this.userId, this.identity, this.name, this.port, this.allowedNetworks);
 
   static const _userIdKey = 'user_id';
   static const _nameKey = 'name';
   static const _portKey = 'port';
   static const _identityKey = 'identity_key';
   static const _networksKey = 'allowed_networks';
-  static const _avatarKey = 'avatar';
 
   final PreferenceStore _prefs;
 
@@ -68,9 +64,6 @@ class Settings {
   /// aucune restriction). Une configuration gérée par l'administrateur l'emporte.
   String allowedNetworks;
 
-  /// Photo de profil (JPEG) envoyée aux contacts ; vide : initiales.
-  Uint8List avatar;
-
   static Future<Settings> load(PreferenceStore prefs, [SecretStore? secrets]) async {
     var userId = await prefs.getString(_userIdKey);
     if (!isValidId(userId)) {
@@ -85,17 +78,7 @@ class Settings {
       await prefs.getString(_nameKey),
       port != null && port > 0 && port < 65536 ? port : defaultPort,
       await prefs.getString(_networksKey) ?? '',
-      _decodeAvatar(await prefs.getString(_avatarKey)),
     );
-  }
-
-  static Uint8List _decodeAvatar(String? stored) {
-    if (stored == null || stored.isEmpty) return Uint8List(0);
-    try {
-      return base64.decode(stored);
-    } on FormatException {
-      return Uint8List(0);
-    }
   }
 
   static Future<KeyPair> _loadIdentity(PreferenceStore prefs, SecretStore secrets) async {
@@ -114,6 +97,5 @@ class Settings {
     if (value != null) await _prefs.setString(_nameKey, value);
     await _prefs.setInt(_portKey, port);
     await _prefs.setString(_networksKey, allowedNetworks);
-    await _prefs.setString(_avatarKey, base64.encode(avatar));
   }
 }

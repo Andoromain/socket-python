@@ -126,29 +126,6 @@ def test_encrypted_connection_pins_keys_and_agrees_on_safety_number(qtbot, make_
     assert answer["number"] == safety_number(pc.identity.public, decode_key(phone.key))
 
 
-def test_profile_photos_in_both_directions(qtbot, make_messenger, phone):
-    import base64
-
-    pc = connected(qtbot, make_messenger, phone)
-    pc_photo = b"\xff\xd8\xff\xe0" + bytes(range(256)) * 4
-    pc.set_avatar(pc_photo)
-
-    def phone_has(photo):
-        phone.events.clear()
-        phone.command("contact", id=pc.user_id)
-        answer = phone.wait(qtbot, "contact", id=pc.user_id)
-        return answer["avatar"] == (base64.b64encode(photo).decode() if photo else None)
-
-    qtbot.waitUntil(lambda: phone_has(pc_photo), timeout=TIMEOUT)
-
-    phone_photo = b"\xff\xd8\xff\xe1" + b"photo du telephone"
-    phone.command("set_avatar", data=base64.b64encode(phone_photo).decode())
-    qtbot.waitUntil(lambda: pc.store.contact(phone.id).avatar == phone_photo, timeout=TIMEOUT)
-
-    pc.set_avatar(b"")
-    qtbot.waitUntil(lambda: phone_has(b""), timeout=TIMEOUT)
-
-
 def test_messages_receipts_typing_and_reactions(qtbot, make_messenger, phone):
     pc = connected(qtbot, make_messenger, phone)
     assert [s.contact.name for s in pc.store.contacts()] == ["Téléphone"]
