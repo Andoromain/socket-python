@@ -14,7 +14,10 @@ central :
 - **envoi de fichiers et d'images** (bouton 📎, glisser-déposer, Ctrl+V d'une capture) :
   le destinataire voit un aperçu et accepte ou refuse ;
 - **notifications** et compteur de non-lus dans la zone de notification, où
-  l'application reste active quand on ferme la fenêtre.
+  l'application reste active quand on ferme la fenêtre ;
+- **échanges chiffrés de bout en bout** (protocole Noise) : personne d'autre sur le
+  réseau ne peut lire ni modifier les messages et les fichiers, et un **code de
+  sécurité** (bouton 🔒) permet de vérifier qu'on parle bien au bon collègue.
 
 Fonctionne sous **Windows** et **Linux** (Python ≥ 3.12, Qt 6 via PySide6), en thème
 clair ou sombre selon le système.
@@ -139,14 +142,21 @@ ils sont stockés dans le profil de l'utilisateur, pas avec le programme. L'hist
 converti automatiquement si le format change.
 
 > Après une mise à jour qui change la version du protocole (indiqué dans le
-> [journal des modifications](CHANGELOG.md), par exemple 3.0 → 3.1), **tous les postes
-> doivent être mis à jour** : les versions différentes ne communiquent pas entre elles.
+> [journal des modifications](CHANGELOG.md), par exemple 3.x → 4.0), **tous les postes
+> et téléphones doivent être mis à jour** : les versions différentes ne communiquent
+> pas entre elles. Un poste en 4.0 explique à l'utilisateur que son correspondant
+> utilise une ancienne version.
 
 ### Mise à jour automatique
 
-À chaque tag `vX.Y.Z`, le workflow **Release** publie les installeurs, l'APK et le
-manifeste `latest.json` dans les **Releases de ce dépôt** (public). Aucun réglage n'est
-nécessaire.
+À chaque tag `vX.Y.Z`, le workflow **Release** publie les installeurs, l'APK, le
+manifeste `latest.json` et sa signature `latest.json.sig` dans les **Releases de ce
+dépôt** (public). Aucun réglage n'est nécessaire sur les postes.
+
+Les postes n'installent une mise à jour que si `latest.json` est **signé avec la clé de
+Socket Chat** (Ed25519) : la clé privée est un secret du dépôt, la clé publique est
+intégrée à l'application (`src/socket_chat/signing.py`). Un compte GitHub piraté ou un
+dossier réseau modifié ne peut donc pas faire installer un faux programme.
 
 Les postes lisent
 `https://github.com/Andoromain/socket-python/releases/latest/download/latest.json`
@@ -160,9 +170,10 @@ ou, pour tout le monde, dans `HKEY_LOCAL_MACHINE\Software\SocketChat\SocketChat`
 |---|---|
 | `update/url` | Autre source : adresse HTTPS, dossier réseau (`\\serveur\logiciels\socket-chat`) ou chemin local contenant `latest.json` et les installeurs |
 | `update/enabled` | `false` pour désactiver la mise à jour automatique |
+| `network/allowed_networks` | Réseaux avec lesquels Socket Chat accepte de parler, par exemple `10.20.0.0/16, 192.168.1.0/24` : connexions et annonces venant d'ailleurs ignorées (portable sur un Wi-Fi d'hôtel ou à domicile). Vide : aucune restriction |
 
-Pour un dossier réseau, y copier les fichiers de la Release (installeurs et
-`latest.json`) tels quels.
+Pour un dossier réseau, y copier les fichiers de la Release (installeurs, `latest.json`
+et `latest.json.sig`) **tels quels** : un manifeste modifié ou sans signature est refusé.
 
 ## Utilisation
 
@@ -177,6 +188,8 @@ Pour un dossier réseau, y copier les fichiers de la Release (installeurs et
 | Envoyer un fichier | Bouton 📎, glisser-déposer dans la conversation, ou `Ctrl+V` (fichier copié ou capture d'écran) |
 | Recevoir un fichier | **Accepter** (on choisit où l'enregistrer) ou **Refuser** dans la bulle ; puis **Ouvrir** / **Dossier** |
 | Copier un message | Clic droit sur la bulle |
+| Vérifier le chiffrement avec un collègue | Bouton 🔒 en haut de la conversation : comparer de vive voix (ou par téléphone) le code de sécurité affiché des deux côtés. Identiques : personne ne s'intercale entre vous |
+| « La clé de sécurité a changé » | Bandeau orange : le collègue a réinstallé Socket Chat ou changé de poste… ou quelqu'un tente d'usurper son identité. Les échanges sont bloqués ; après vérification avec lui, **Accepter la nouvelle clé…** |
 | Changer de nom, de port, le comportement à la fermeture | **Socket Chat › Préférences…** |
 | Quitter vraiment | **Socket Chat › Quitter** (`Ctrl+Q`) ou clic droit sur l'icône de notification |
 
@@ -215,26 +228,72 @@ Options en ligne de commande : `socket-chat --version`, `socket-chat --debug`
 | Préférences | registre `HKCU\Software\SocketChat` | `~/.config/SocketChat/SocketChat.conf` |
 | Historique | `%LOCALAPPDATA%\SocketChat\SocketChat\history.sqlite3` | `~/.local/share/SocketChat/SocketChat/history.sqlite3` |
 | Journal | `%LOCALAPPDATA%\SocketChat\SocketChat\socket-chat.log` | `~/.local/share/SocketChat/SocketChat/socket-chat.log` |
+| Clé du poste (chiffrement des échanges) | `%LOCALAPPDATA%\SocketChat\SocketChat\identity.key` | `~/.local/share/SocketChat/SocketChat/identity.key` |
+| Clé de l'historique | `%LOCALAPPDATA%\SocketChat\SocketChat\history.key` | `~/.local/share/SocketChat/SocketChat/history.key` |
+
+Les deux clés sont créées au premier lancement. Sous Windows, elles sont chiffrées par
+Windows (DPAPI) avec la session de l'utilisateur : copiées sur un autre poste ou lues
+depuis un autre compte, elles sont inutilisables. Sous Linux, elles ne sont lisibles que
+par l'utilisateur (droits 600).
+
+- Ne copiez pas ces fichiers sur un autre poste. Si `identity.key` est supprimée, une
+  nouvelle est créée : vos collègues verront « La clé de sécurité a changé » et devront
+  l'accepter.
+- Si `history.key` est perdue (ou le profil restauré sur un autre poste), l'historique
+  ne peut plus être déchiffré : il est mis de côté sous le nom
+  `history-illisible.sqlite3` (jamais effacé) et un nouvel historique commence.
+
+Sur Android, la clé de l'appareil et celle de l'historique sont gardées par Android
+Keystore, et les sauvegardes Android sont désactivées pour l'application.
 
 ## Sécurité
 
-Conçu pour un **réseau interne de confiance** :
+Conçu pour un **réseau interne**, sans serveur ni service extérieur : rien ne sort du
+réseau de l'entreprise.
 
-- Les échanges **ne sont pas chiffrés** et les correspondants ne sont pas authentifiés
-  (le nom et l'identifiant annoncés sont déclaratifs). Ne pas l'utiliser pour des
-  informations confidentielles ni l'exposer sur Internet.
-- L'historique est stocké en clair dans le profil de l'utilisateur (sur Android, dans
-  l'espace privé de l'application).
-- Sur **Wi-Fi**, les échanges non chiffrés sont plus exposés qu'en filaire : n'utiliser
-  l'application Android que sur le Wi-Fi interne protégé (WPA2/WPA3 entreprise), jamais
-  sur un réseau invité ou public.
-- Mise à jour automatique : uniquement en HTTPS (ou depuis un dossier), version
-  strictement plus récente, taille et empreinte SHA-256 vérifiées avant toute exécution.
-  La confiance repose sur le compte GitHub qui publie : protégez-le (double
+- **Chiffrement de bout en bout** (depuis la 4.0) : chaque connexion commence par une
+  poignée de main [Noise](https://noiseprotocol.org/) `Noise_XX_25519_ChaChaPoly_SHA256`
+  (X25519, ChaCha20-Poly1305, SHA-256). Messages, accusés, réactions et fichiers sont
+  chiffrés et authentifiés : une écoute du réseau (Wi-Fi compris) ne révèle rien de leur
+  contenu, et une donnée modifiée en route coupe la connexion. Les clés de session sont
+  éphémères : une clé de poste volée plus tard ne permet pas de déchiffrer les échanges
+  passés enregistrés.
+- **Authentification des correspondants** : chaque poste a sa propre clé
+  (`identity.key`) et le prouve à chaque connexion. La clé d'un collègue est mémorisée au
+  premier échange ; ensuite, toute autre clé est **refusée** et signalée (bandeau « clé
+  changée »). Pour exclure une usurpation dès le premier échange, comparez le **code de
+  sécurité** (bouton 🔒) avec votre collègue.
+- Ce qui reste visible sur le réseau : les annonces de présence (nom affiché, port) et
+  le fait que deux postes communiquent, pas le contenu. Le nom d'un contact déjà vérifié
+  ne peut pas être modifié par une annonce.
+- **Historique chiffré sur le disque** : le texte des messages, le nom et le chemin des
+  fichiers et les aperçus d'images sont chiffrés (ChaCha20-Poly1305) avec la clé de
+  l'historique, protégée par DPAPI sous Windows et par Android Keystore sur téléphone.
+  Chaque valeur est liée à son message : elle ne peut être ni modifiée ni déplacée sans
+  être détectée. Un historique existant est chiffré au premier lancement de la 4.0 puis
+  compacté, pour qu'aucune ancienne donnée en clair ne reste dans le fichier. Restent
+  lisibles les contacts, les dates et les états des messages. Sous Linux, la clé est
+  protégée par les droits du fichier : chiffrez le disque (LUKS) pour vous protéger du
+  vol. Les fichiers reçus sont enregistrés tels quels, là où l'utilisateur l'a choisi.
+- Mise à jour automatique : uniquement en HTTPS (ou depuis un dossier), manifeste
+  **signé** (Ed25519, clé publique intégrée à l'application), version strictement plus
+  récente, taille et empreinte SHA-256 vérifiées avant toute exécution. Gardez la clé
+  privée (`UPDATE_SIGNING_KEY`) hors du dépôt et protégez le compte GitHub (double
   authentification).
+- Réseaux autorisés : l'administrateur peut limiter Socket Chat aux réseaux de
+  l'entreprise. Sur un réseau extérieur, l'appareil n'accepte alors plus aucune
+  connexion ni annonce.
+  - **PC** : clé `network/allowed_networks` (voir « Mise à jour automatique » pour
+    l'emplacement des réglages).
+  - **Android** : configuration gérée par la console de gestion des appareils (MDM :
+    Intune, Workspace ONE, Google…), clé `allowed_networks`. À défaut, l'utilisateur
+    peut la fixer lui-même dans les **Préférences** ; une configuration de
+    l'administrateur l'emporte et verrouille le champ.
 - Les données reçues sont validées : taille limitée (10 000 caractères par message,
   64 Kio par trame), JSON strict, texte affiché sans interprétation HTML. Toute donnée
   invalide coupe la connexion.
+- Signaler une faille : voir [SECURITY.md](SECURITY.md) (signalement privé, pas d'issue
+  publique).
 - Fichiers : rien n'est écrit sur le disque sans acceptation ; le nom proposé est
   nettoyé (aucun chemin, aucun caractère interdit sous Windows) et l'utilisateur choisit
   l'emplacement. Un fichier reçu n'est jamais ouvert automatiquement : traitez les
@@ -267,11 +326,15 @@ et nécessitent les bibliothèques système `libegl1 libxkbcommon0 libfontconfig
 src/socket_chat/
 ├── app.py            point d'entrée : instance unique, journal, assemblage
 ├── protocol.py       trames TCP (JSON Lines) et annonces UDP : pur Python, sans Qt
-├── store.py          historique SQLite (contacts, messages, états) : pur Python
-├── network.py        PeerConnection : une connexion TCP avec présentation mutuelle
+├── noise.py          chiffrement des connexions (Noise XX) : pur Python
+├── identity.py       clé du poste et code de sécurité : pur Python
+├── store.py          historique SQLite (contacts, clés, messages, états) : pur Python
+├── network.py        PeerConnection : poignée de main Noise, flux chiffré, présentation
 ├── messenger.py      Messenger : écoute, une connexion par contact, file d'envoi, accusés
 ├── transfers.py      transferts de fichiers : contrôle de flux, SHA-256, annulation
 ├── updater.py        mise à jour automatique : manifeste, téléchargement vérifié, installation
+├── signing.py        signature Ed25519 du manifeste de mise à jour : pur Python
+├── netpolicy.py      réseaux autorisés (réglage d'administration) : pur Python
 ├── discovery.py      Discovery : annonces UDP et détection des collègues
 ├── settings.py       préférences utilisateur (QSettings)
 ├── ui/               fenêtre, modèles, délégués (bulles), emojis, zone de notification
@@ -291,7 +354,7 @@ côtés.
 mobile/lib/
 ├── protocol/     trames et annonces (protocol.py)
 ├── store/        historique SQLite (store.py), même schéma
-├── net/          connexion, messagerie, fichiers, détection (network.py, messenger.py…)
+├── net/          chiffrement, connexion, messagerie, fichiers, détection (noise.py, network.py…)
 ├── app/          préférences, contrôleur, canal Android (verrou multicast Wi-Fi)
 └── ui/           écrans Material 3
 mobile/tool/peer.dart   pair en ligne de commande pour le test d'interopérabilité
@@ -314,11 +377,14 @@ flutter build apk --release
 Compatibilité vérifiée automatiquement :
 
 - `scripts/make_protocol_vectors.py` génère `mobile/test/fixtures/protocol_vectors.json`
-  depuis `protocol.py` (trames valides et leur encodage exact, trames à rejeter) ; les
-  tests Python et Dart lisent ce même fichier. Après une modification du protocole :
-  `python scripts/make_protocol_vectors.py`.
+  depuis `protocol.py` (trames valides et leur encodage exact, trames à rejeter, codes de
+  sécurité) ; les tests Python et Dart lisent ce même fichier. Après une modification du
+  protocole : `python scripts/make_protocol_vectors.py`.
+- Le chiffrement est vérifié des deux côtés avec le vecteur de test officiel de Noise
+  (`tests/fixtures/noise_xx_vector.json`, copié dans `mobile/test/fixtures/`).
 - `tests/test_interop.py` fait converser la version PC avec `mobile/tool/peer.dart`
-  (messages, accusés, réactions, fichiers dans les deux sens, détection). Ignoré si Dart
+  (connexion chiffrée et code de sécurité, messages, accusés, réactions, fichiers dans
+  les deux sens, détection). Ignoré si Dart
   est absent ; obligatoire dans le job « Android » de la CI.
 - La version de `mobile/pubspec.yaml` (et son `versionCode`, `X*10000 + Y*100 + Z`) doit
   être celle de `src/socket_chat/__init__.py`.
@@ -326,12 +392,17 @@ Compatibilité vérifiée automatiquement :
 Captures d'écran de l'interface (à vérifier à l'œil) :
 `SOCKET_CHAT_SCREENSHOTS=/un/dossier flutter test --update-goldens test/screenshots`.
 
-### Protocole (version 3)
+### Protocole (version 4)
 
-Une trame TCP est un objet JSON UTF-8 sur une ligne, terminé par `\n` :
+Une connexion TCP commence par la poignée de main Noise XX (trois messages binaires,
+chacun précédé de sa longueur sur 2 octets ; préambule `SocketChat/4`). Ensuite, tout
+est chiffré : messages Noise de transport (longueur sur 2 octets, puis au plus
+65 535 octets chiffrés) dont le contenu déchiffré est un flux de trames.
+
+Une trame est un objet JSON UTF-8 sur une ligne, terminé par `\n` :
 
 ```json
-{"type": "hello", "version": 3, "id": "<uuid>", "name": "Alice", "port": 12800}
+{"type": "hello", "version": 4, "id": "<uuid>", "name": "Alice", "port": 12800}
 {"type": "chat", "id": "<uuid du message>", "text": "Bonjour\nça va ?"}
 {"type": "ack", "id": "<uuid du message>", "status": "delivered"}
 {"type": "typing", "active": true}
@@ -348,12 +419,14 @@ Les blocs de fichier sont envoyés au rythme où la connexion se vide (jamais pl
 512 Kio en attente), si bien que la conversation reste fluide pendant un transfert et
 qu'un gros fichier n'est jamais chargé en mémoire.
 
-Chaque pair envoie `hello` dès la connexion et doit recevoir celui de l'autre sous
-10 secondes. Les annonces UDP (`announce`, `leave`) portent la même version. Une version
-différente est refusée : tous les postes doivent utiliser la même version du protocole
-(la 3.1 ne communique ni avec la 3.0 ni avec la 2.x). Les trames d'un type inconnu
-sont désormais ignorées : les prochaines nouveautés n'imposeront plus de mise à jour
-simultanée.
+Chaque pair envoie `hello` dès la fin de la poignée de main ; poignée de main et
+présentation doivent aboutir en 10 secondes. La clé prouvée par la poignée de main est
+comparée à celle mémorisée pour l'identifiant présenté. Les annonces UDP (`announce`,
+`leave`, en clair) portent la même version. Une version différente est refusée : tous
+les postes doivent utiliser la même version du protocole (la 4.0 ne communique pas avec
+la 3.x, dont elle reconnaît la présentation en clair pour l'expliquer). Les trames d'un
+type inconnu sont ignorées : les nouveautés qui n'en ajoutent pas n'imposent pas de mise
+à jour simultanée.
 
 ### Publier une version
 
@@ -371,6 +444,11 @@ L'ordre compte : **le numéro de version change dans le code avant le tag**.
    téléphones). **Conservez la clé en lieu sûr** : GitHub ne permet pas de relire un
    secret, et sans elle plus aucune mise à jour Android n'est possible sans
    désinstaller.
+   Le manifeste `latest.json` est signé avec le secret `UPDATE_SIGNING_KEY` (clé
+   Ed25519 en base64). Sans lui, ou s'il ne correspond pas à la clé publique de
+   `src/socket_chat/signing.py`, la publication s'arrête. Nouvelle paire de clés :
+   `python scripts/sign_manifest.py --generate` (ajouter la nouvelle clé publique à
+   `TRUSTED_KEYS` et publier une version **avant** de signer avec la nouvelle clé).
 2. Fusionner la PR.
 3. Créer et pousser le tag correspondant, depuis `main` à jour :
    ```bash

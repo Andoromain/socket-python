@@ -102,6 +102,13 @@ class _ContactsScreenState extends State<ContactsScreen> {
           ),
           body: Column(
             children: [
+              if (controller.notice case final notice?)
+                MaterialBanner(
+                  key: const Key('notice'),
+                  leading: const Icon(Icons.lock_outline),
+                  content: Text(notice),
+                  actions: [TextButton(onPressed: controller.dismissNotice, child: const Text('OK'))],
+                ),
               if (controller.startError case final error?)
                 MaterialBanner(
                   leading: const Icon(Icons.wifi_off),

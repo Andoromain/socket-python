@@ -1,8 +1,40 @@
 # Journal des modifications
 
-## 3.3.2
+## 4.0.0
 
-Compatible avec la 3.3 (même protocole).
+**Nouveau protocole (version 4) : tous les postes et téléphones doivent être mis à
+jour.** Un poste en 4.0 ne communique pas avec un poste en 3.x ; il reconnaît
+l'ancienne version et l'explique. Installez la 4.0 sur les téléphones (APK) en même
+temps que sur les postes.
+
+### Sécurité
+- **Chiffrement de bout en bout** : chaque connexion commence par une poignée de main
+  Noise (`Noise_XX_25519_ChaChaPoly_SHA256`) ; messages, accusés, réactions et fichiers
+  sont chiffrés et authentifiés. Une écoute du réseau, Wi-Fi compris, ne révèle plus
+  leur contenu, et une donnée modifiée en route coupe la connexion.
+- **Clé de sécurité par poste** : chaque poste et téléphone a sa propre clé, prouvée à
+  chaque connexion. La clé d'un collègue est mémorisée au premier échange ; une autre
+  clé est ensuite refusée et signalée par un bandeau « La clé de sécurité a changé »,
+  avec **Accepter la nouvelle clé…** après vérification.
+- **Code de sécurité** (bouton 🔒 dans la conversation) : à comparer avec le collègue
+  pour s'assurer que personne ne s'intercale.
+- Une annonce sur le réseau ne peut plus renommer un contact vérifié.
+- **Mises à jour signées** : l'application n'installe une mise à jour que si son
+  manifeste `latest.json` est signé avec la clé de Socket Chat (Ed25519,
+  `latest.json.sig`). Un compte GitHub piraté, un miroir ou un dossier réseau modifié
+  ne peut plus faire installer un faux programme.
+- **Historique chiffré sur le disque** : texte des messages, noms et chemins des
+  fichiers, aperçus d'images. La clé est protégée par Windows (DPAPI) sur PC et par
+  Android Keystore sur téléphone. L'historique existant est chiffré au premier lancement,
+  puis compacté. La clé du poste (`identity.key`) est elle aussi protégée par DPAPI.
+- **Réseaux autorisés** : l'administrateur peut limiter Socket Chat aux réseaux de
+  l'entreprise (PC : réglage `network/allowed_networks` ; Android : configuration
+  gérée par MDM, ou Préférences de l'application) ; ailleurs, l'appareil ignore
+  connexions et annonces.
+- Android : sauvegardes de l'application désactivées (l'historique et les clés restent
+  sur le téléphone).
+- Workflows GitHub en lecture seule par défaut, mises à jour de sécurité des
+  dépendances (Dependabot), procédure de signalement des failles (`SECURITY.md`).
 
 ### Modifié
 - La mise à jour automatique lit désormais les Releases du dépôt du projet
@@ -11,8 +43,14 @@ Compatible avec la 3.3 (même protocole).
 - Le code est distribué sous licence MIT.
 
 ### À savoir
-- Les postes en 3.3.1 ou avant cherchent encore les mises à jour dans l'ancien dépôt :
-  installez une fois la 3.3.2 à la main, les suivantes arriveront automatiquement.
+- Les postes en 3.x ne se mettent pas à jour seuls vers la 4.0 (ils cherchent dans
+  l'ancien dépôt des installeurs) : installez une fois la 4.0 à la main. Les versions
+  suivantes arriveront automatiquement.
+- L'historique est conservé (et chiffré au premier lancement) ; au premier échange en
+  4.0, la clé de chaque collègue est mémorisée. Comparez ensuite le code de sécurité
+  avec vos collègues proches.
+- Ne copiez pas le profil Socket Chat d'un poste à un autre : l'historique chiffré n'y
+  serait pas lisible (il est alors mis de côté, jamais effacé).
 
 ## 3.3.1
 

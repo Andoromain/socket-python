@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from PySide6.QtCore import QSettings, QUrl
 from PySide6.QtWidgets import QTextBrowser
+from update_keys import sign_manifest
 
 from socket_chat import __version__
 from socket_chat.settings import Settings
@@ -33,6 +34,7 @@ def make_repo(root: Path, version: str, payload: bytes = b"archive") -> Path:
         },
     }
     (root / "latest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    sign_manifest(root / "latest.json")
     return root
 
 

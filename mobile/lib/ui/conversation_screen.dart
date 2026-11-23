@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../app/controller.dart';
+import '../net/identity.dart';
 import '../store/store.dart';
 import 'format.dart';
 import 'widgets.dart';
@@ -188,6 +189,87 @@ class _ConversationScreenState extends State<ConversationScreen> {
     ),
   );
 
+  // -- Sécurité ----------------------------------------------------------
+  void _showSafetyNumber(Contact contact) {
+    final key = controller.messenger.contactKey(contact.id);
+    final number = key == null ? null : safetyNumber(controller.messenger.identity.public, key);
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Chiffrement — ${contact.name}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('🔒 Vos échanges avec ${contact.name} sont chiffrés.'),
+            const SizedBox(height: 16),
+            if (number == null)
+              Text(
+                "${contact.name} ne s'est pas encore connecté avec une version chiffrée de Socket Chat : "
+                'le code de sécurité apparaîtra après votre premier échange.',
+              )
+            else ...[
+              Center(
+                child: SelectableText(
+                  formatSafetyNumber(number),
+                  key: const Key('safety-number-text'),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 20, height: 1.5),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                "Comparez ce code avec celui qu'affiche ${contact.name} (🔒 dans votre conversation), "
+                "en personne ou par téléphone. S'ils sont identiques, personne ne peut lire ni modifier "
+                'vos échanges.',
+              ),
+            ],
+          ],
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Fermer'))],
+      ),
+    );
+  }
+
+  Future<void> _acceptNewKey(Contact contact) async {
+    final pending = contact.pendingKey;
+    if (pending == null) return;
+    final number = safetyNumber(controller.messenger.identity.public, decodeKey(pending));
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Nouvelle clé de sécurité'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Accepter la nouvelle clé de ${contact.name} ?'),
+            const SizedBox(height: 12),
+            const Text('Nouveau code de sécurité :'),
+            const SizedBox(height: 8),
+            Center(
+              child: SelectableText(
+                formatSafetyNumber(number),
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 18, height: 1.5),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              "Comparez-le d'abord avec celui qu'affiche ${contact.name} (🔒 dans votre conversation). "
+              "N'acceptez pas si vous n'avez pas pu vérifier.",
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Annuler')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Accepter')),
+        ],
+      ),
+    );
+    if (accepted == true) controller.messenger.trustNewKey(contact.id);
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = BubbleColors.of(context);
@@ -212,6 +294,14 @@ class _ConversationScreenState extends State<ConversationScreen> {
             backgroundColor: colors.background,
             appBar: AppBar(
               titleSpacing: 0,
+              actions: [
+                IconButton(
+                  key: const Key('safety-number'),
+                  icon: const Icon(Icons.lock_outline),
+                  tooltip: 'Chiffrement : vérifier le code de sécurité',
+                  onPressed: () => _showSafetyNumber(contact),
+                ),
+              ],
               title: Row(
                 children: [
                   Avatar(name: contact.name, contactId: contact.id, online: online, size: 38),
@@ -237,6 +327,16 @@ class _ConversationScreenState extends State<ConversationScreen> {
             ),
             body: Column(
               children: [
+                if (contact.pendingKey != null)
+                  _KeyBanner(
+                    key: const Key('changed-key'),
+                    warning: true,
+                    text: changedKeyText(contact.name),
+                    action: 'Accepter la nouvelle clé…',
+                    onAction: () => _acceptNewKey(contact),
+                  ),
+                if (messenger.refusesOurKey(contactId))
+                  _KeyBanner(key: const Key('refused-key'), warning: false, text: refusedKeyText(contact.name)),
                 Expanded(
                   child: messages.isEmpty
                       ? _NoMessages(name: contact.name)
@@ -319,6 +419,52 @@ class _ReactionChoice extends StatelessWidget {
           color: selected ? Theme.of(context).colorScheme.primaryContainer : null,
         ),
         child: Text(emoji, style: const TextStyle(fontSize: 28)),
+      ),
+    );
+  }
+}
+
+String changedKeyText(String name) =>
+    '⚠ La clé de sécurité de $name a changé : vos échanges sont bloqués. C\'est normal après une '
+    'réinstallation de Socket Chat ou un changement d\'appareil ; sinon, quelqu\'un tente peut-être '
+    'd\'usurper son identité. Vérifiez avec cette personne avant d\'accepter.';
+
+String refusedKeyText(String name) =>
+    '$name ne reconnaît pas encore la clé de cet appareil (réinstallation ?) : elle doit être '
+    'acceptée de son côté, dans votre conversation, pour que vos messages passent.';
+
+/// Avertissement de sécurité en haut de la conversation (clé changée ou refusée).
+class _KeyBanner extends StatelessWidget {
+  const _KeyBanner({super.key, required this.warning, required this.text, this.action, this.onAction});
+
+  final bool warning;
+  final String text;
+  final String? action;
+  final VoidCallback? onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final background = warning ? scheme.errorContainer : scheme.secondaryContainer;
+    final foreground = warning ? scheme.onErrorContainer : scheme.onSecondaryContainer;
+    return Material(
+      color: background,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 8, 6),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Text(text, style: TextStyle(color: foreground, fontSize: 13)),
+            if (action != null)
+              TextButton(
+                onPressed: onAction,
+                style: TextButton.styleFrom(foregroundColor: foreground),
+                child: Text(action!),
+              )
+            else
+              const SizedBox(height: 4),
+          ],
+        ),
       ),
     );
   }

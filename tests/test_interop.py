@@ -101,7 +101,7 @@ class DartPeer:
 def phone(qtbot):
     peer = DartPeer("Téléphone")
     started = peer.wait(qtbot, "started", timeout=180_000)  # première compilation
-    peer.id, peer.port = started["id"], started["port"]
+    peer.id, peer.port, peer.key = started["id"], started["port"], started["key"]
     yield peer
     peer.close()
 
@@ -112,6 +112,18 @@ def connected(qtbot, make_messenger, phone):
         phone.command("connect", host="127.0.0.1", port=pc.port)
     phone.wait(qtbot, "presence", contact=pc.user_id, online=True)
     return pc
+
+
+def test_encrypted_connection_pins_keys_and_agrees_on_safety_number(qtbot, make_messenger, phone):
+    """Les deux implémentations de Noise s'entendent : clés prouvées, même code."""
+    from socket_chat.identity import decode_key, encode_key, safety_number
+
+    pc = connected(qtbot, make_messenger, phone)
+    assert pc.store.contact(phone.id).public_key == phone.key
+    phone.command("safety", contact=pc.user_id)
+    answer = phone.wait(qtbot, "safety", contact=pc.user_id)
+    assert answer["key"] == encode_key(pc.identity.public)
+    assert answer["number"] == safety_number(pc.identity.public, decode_key(phone.key))
 
 
 def test_messages_receipts_typing_and_reactions(qtbot, make_messenger, phone):

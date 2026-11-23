@@ -14,6 +14,7 @@ import 'dart:io';
 
 import '../core/signal.dart';
 import '../protocol/protocol.dart';
+import 'netpolicy.dart';
 
 /// Intervalle entre deux annonces (ms).
 int announceIntervalMs = 5000;
@@ -72,6 +73,12 @@ class Discovery {
 
   /// Calcule les adresses de diffusion (quand [targets] vaut `null`).
   final Future<List<String>> Function() broadcastProvider;
+
+  /// Réseaux autorisés (netpolicy.dart) ; liste vide : aucune restriction.
+  List<Network> allowedNetworks = const [];
+
+  /// Règle d'adresse (remplaçable dans les tests, où tout passe par la boucle locale).
+  bool Function(String address, List<Network> networks) addressPolicy = isAllowed;
 
   /// Identifiant, nom, adresse, port TCP.
   final Signal<(String, String, String, int)> peerSeen = Signal();
@@ -169,9 +176,10 @@ class Discovery {
     if (socket == null) return;
     Datagram? datagram;
     while ((datagram = socket.receive()) != null) {
+      if (!addressPolicy(datagram!.address.address, allowedNetworks)) continue;
       Announcement announcement;
       try {
-        announcement = decodeAnnounce(datagram!.data);
+        announcement = decodeAnnounce(datagram.data);
       } on ProtocolException {
         continue;
       }

@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QListView,
     QMenu,
+    QMessageBox,
     QPlainTextEdit,
     QStackedWidget,
     QToolButton,
@@ -46,6 +47,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..identity import decode_key, safety_number
 from ..messenger import Messenger
 from ..protocol import MAX_TEXT_LENGTH
 from ..settings import Settings
@@ -53,6 +55,13 @@ from ..store import ME, FileState, MessageRecord
 from .delegates import BubbleDelegate
 from .emoji import QUICK_REACTIONS, EmojiPicker, ReactionBar, convert_shortcuts, emoji_font
 from .models import MessageItem, MessageListModel, Role
+from .security import (
+    KeyBanner,
+    SafetyNumberDialog,
+    changed_key_text,
+    format_number,
+    refused_key_text,
+)
 from .theme import avatar_pixmap, current_theme
 
 MAX_INPUT_LINES = 5
@@ -265,6 +274,11 @@ class ConversationView(QWidget):
         self.outbox_dir = Path(data) / "envois"
         #: Choix du fichier de destination (remplaçable dans les tests).
         self.ask_save_path = self._ask_save_path
+        #: Affichage des boîtes de dialogue et confirmation (remplaçables dans les tests).
+        self.open_dialog = lambda dialog: dialog.exec()
+        self.confirm = self._confirm
+        #: Contacts qui refusent la clé de ce poste (signal ``key_refused``).
+        self._refused_by: set[str] = set()
         self.setAcceptDrops(True)
 
         self.stack = QStackedWidget(self)
@@ -280,6 +294,8 @@ class ConversationView(QWidget):
         messenger.typing_changed.connect(self._on_contact_state)
         messenger.presence_changed.connect(self._on_contact_state)
         messenger.contacts_changed.connect(self._refresh_header)
+        messenger.key_changed.connect(self._on_contact_key)
+        messenger.key_refused.connect(self._on_key_refused)
 
     # -- Construction ----------------------------------------------------
     def _build_empty_page(self) -> QWidget:
@@ -333,11 +349,21 @@ class ConversationView(QWidget):
         header_layout.addWidget(self.avatar)
         header_layout.addSpacing(6)
         header_layout.addLayout(titles, 1)
+        self.lock_button = self._tool_button(
+            header, "🔒", "Chiffrement : vérifier le code de sécurité"
+        )
+        self.lock_button.clicked.connect(self.show_safety_number)
+        header_layout.addWidget(self.lock_button)
 
         separator = QFrame(page)
         separator.setFrameShape(QFrame.Shape.HLine)
         separator.setFrameShadow(QFrame.Shadow.Plain)
         separator.setForegroundRole(QPalette.ColorRole.Mid)
+
+        # Avertissements de sécurité
+        self.changed_banner = KeyBanner(warning=True, parent=page)
+        self.changed_banner.accept_requested.connect(self.accept_new_key)
+        self.refused_banner = KeyBanner(warning=False, parent=page)
 
         # Fil de messages
         self.model = MessageListModel(self)
@@ -384,6 +410,8 @@ class ConversationView(QWidget):
         layout.setSpacing(0)
         layout.addWidget(header)
         layout.addWidget(separator)
+        layout.addWidget(self.changed_banner)
+        layout.addWidget(self.refused_banner)
         layout.addWidget(self.list, 1)
         layout.addLayout(input_row)
         return page
@@ -590,6 +618,60 @@ class ConversationView(QWidget):
         if contact_id == self.contact_id:
             self._refresh_header()
 
+    # -- Sécurité ----------------------------------------------------------
+    def show_safety_number(self) -> None:
+        contact = self._contact()
+        if contact is None:
+            return
+        dialog = SafetyNumberDialog(
+            contact.name,
+            self._messenger.identity.public,
+            self._messenger.contact_key(contact.id),
+            self,
+        )
+        self.open_dialog(dialog)
+
+    def accept_new_key(self) -> None:
+        contact = self._contact()
+        if contact is None or contact.pending_key is None:
+            return
+        number = safety_number(self._messenger.identity.public, decode_key(contact.pending_key))
+        question = (
+            f"Accepter la nouvelle clé de {contact.name} ?\n\n"
+            f"Nouveau code de sécurité :\n{format_number(number)}\n\n"
+            f"Comparez-le d'abord avec celui qu'affiche {contact.name} (🔒 dans votre "
+            "conversation). N'acceptez pas si vous n'avez pas pu vérifier."
+        )
+        if self.confirm("Nouvelle clé de sécurité", question):
+            self._messenger.trust_new_key(contact.id)
+
+    def _confirm(self, title: str, text: str) -> bool:
+        answer = QMessageBox.question(
+            self,
+            title,
+            text,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return answer == QMessageBox.StandardButton.Yes
+
+    def _on_contact_key(self, contact_id: str) -> None:
+        if contact_id == self.contact_id:
+            self._refresh_header()
+
+    def _on_key_refused(self, contact_id: str, refused: bool) -> None:
+        if refused:
+            self._refused_by.add(contact_id)
+        else:
+            self._refused_by.discard(contact_id)
+        if contact_id == self.contact_id:
+            self._refresh_header()
+
+    def _contact(self):
+        if self.contact_id is None:
+            return None
+        return self._messenger.store.contact(self.contact_id)
+
     def _refresh_header(self) -> None:
         if self.contact_id is None:
             return
@@ -605,6 +687,10 @@ class ConversationView(QWidget):
         else:
             status = "hors ligne — vos messages lui seront remis à sa reconnexion"
         self.status_label.setText(status)
+        self.changed_banner.label.setText(changed_key_text(contact.name))
+        self.changed_banner.setVisible(contact.pending_key is not None)
+        self.refused_banner.label.setText(refused_key_text(contact.name))
+        self.refused_banner.setVisible(contact.id in self._refused_by)
 
     def changeEvent(self, event: QEvent) -> None:  # noqa: N802 - API Qt
         if event.type() == QEvent.Type.PaletteChange and hasattr(self, "list"):

@@ -1,7 +1,11 @@
-"""Couche réseau : une connexion TCP avec un pair.
+"""Couche réseau : une connexion TCP chiffrée avec un pair.
 
 Tout repose sur la boucle d'événements de Qt (``QTcpSocket``) : aucun thread
 n'est nécessaire et les signaux peuvent être reliés directement à l'interface.
+
+Déroulement (protocole 4) : poignée de main Noise XX (voir ``noise``), qui prouve la
+clé de chaque poste et établit les clés de session, puis flux chiffré transportant les
+trames JSON habituelles, à commencer par la présentation (« hello »).
 """
 
 from __future__ import annotations
@@ -11,14 +15,21 @@ import logging
 from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtNetwork import QAbstractSocket, QNetworkInterface, QTcpSocket
 
+from . import noise
+from .identity import PROLOGUE
 from .protocol import FrameDecoder, Message, MessageType, ProtocolError, encode
 
 log = logging.getLogger(__name__)
 
 #: Délai maximal pour établir la connexion TCP (ms).
 CONNECT_TIMEOUT_MS = 10_000
-#: Délai maximal pour recevoir la présentation (« hello ») du pair (ms).
+#: Délai maximal pour la poignée de main et la présentation (« hello ») du pair (ms).
 HANDSHAKE_TIMEOUT_MS = 10_000
+
+OLD_VERSION_ERROR = (
+    "Ce correspondant utilise une ancienne version de Socket Chat, sans chiffrement : "
+    "il doit la mettre à jour (version 4 ou plus récente)."
+)
 #: Délai maximal accordé à une fermeture polie avant de couper la connexion (ms).
 CLOSE_TIMEOUT_MS = 3_000
 
@@ -49,10 +60,12 @@ def local_ipv4_addresses() -> list[str]:
 
 
 class PeerConnection(QObject):
-    """Connexion avec un pair, au-dessus d'une ``QTcpSocket``.
+    """Connexion chiffrée avec un pair, au-dessus d'une ``QTcpSocket``.
 
-    Gère la présentation mutuelle (« hello »), le découpage des trames et la
-    fermeture. Le signal :attr:`closed` est émis exactement une fois.
+    Gère la poignée de main Noise, la présentation mutuelle (« hello »), le
+    chiffrement et le découpage des trames, et la fermeture. Le signal :attr:`closed`
+    est émis exactement une fois. :attr:`peer_key` est la clé publique prouvée du
+    pair (disponible dès :attr:`ready`).
 
     ``outgoing`` indique qui a ouvert la connexion : ce poste (connexion
     sortante, ``socket`` pas encore connectée) ou le pair (connexion acceptée).
@@ -69,6 +82,7 @@ class PeerConnection(QObject):
         hello: Message,
         *,
         outgoing: bool,
+        identity: noise.KeyPair,
         parent: QObject | None = None,
     ):
         super().__init__(parent)
@@ -76,6 +90,10 @@ class PeerConnection(QObject):
         socket.setParent(self)
         self._hello = hello
         self.outgoing = outgoing
+        self._noise = noise.HandshakeState(outgoing, identity, PROLOGUE)
+        self._frames = noise.FrameReader()
+        self._started = False
+        self._received_any = False
         self._decoder = FrameDecoder()
         self._peer_id: str | None = None
         self._peer_name: str | None = None
@@ -119,6 +137,15 @@ class PeerConnection(QObject):
         return self._peer_name
 
     @property
+    def peer_key(self) -> bytes | None:
+        """Clé publique du pair, prouvée par la poignée de main (``None`` avant)."""
+        return self._noise.remote_static if self._noise.complete else None
+
+    @property
+    def secure(self) -> bool:
+        return self._noise.complete
+
+    @property
     def peer_address(self) -> str:
         return self._socket.peerAddress().toString()
 
@@ -146,7 +173,7 @@ class PeerConnection(QObject):
         """Termine poliment la conversation (envoie « bye » puis ferme)."""
         if self._finished:
             return
-        if self._socket.state() == QAbstractSocket.SocketState.ConnectedState:
+        if self._socket.state() == QAbstractSocket.SocketState.ConnectedState and self.secure:
             self._close_reason = reason
             self._write(Message.bye(reason))
             self._socket.disconnectFromHost()
@@ -160,36 +187,70 @@ class PeerConnection(QObject):
 
     def abort(self, reason: str = "") -> None:
         """Ferme brutalement, sans prévenir le pair."""
+        if not self._finished:
+            # abort() peut émettre « disconnected » immédiatement : le motif doit déjà
+            # être connu de _on_disconnected.
+            self._close_reason = reason
         self._socket.abort()
         self._finish(reason)
 
     # -- Interne ---------------------------------------------------------
     def _write(self, message: Message) -> None:
-        self._socket.write(encode(message))
+        assert self._noise.send is not None, "trame avant la fin de la poignée de main"
+        self._socket.write(noise.encrypt_stream(self._noise.send, encode(message)))
 
     def _on_connected(self) -> None:
-        self._send_hello()
+        """Connexion TCP établie : l'initiateur ouvre la poignée de main."""
+        if self._finished or self._started:
+            return
+        self._started = True
+        self._connect_timer.stop()
+        self._handshake_timer.start()  # poignée de main et présentation comprises
+        if self.outgoing:
+            self._socket.write(noise.frame(self._noise.write_message()))
 
     def _send_hello(self) -> None:
-        """Envoie notre présentation une seule fois (idempotent)."""
-        if self._finished or self._hello_sent:
+        """Envoie notre présentation une seule fois (idempotent), une fois chiffré."""
+        if self._finished or self._hello_sent or not self.secure:
             return
         self._hello_sent = True
-        self._connect_timer.stop()
-        log.debug("Connecté à %s, envoi de la présentation", self.peer_address)
+        log.debug("Connexion chiffrée avec %s, envoi de la présentation", self.peer_address)
         self._write(self._hello)
-        if self._peer_id is None:
-            # Délai accordé au pair pour se présenter, s'il ne l'a pas déjà fait.
-            self._handshake_timer.start()
 
     def _on_ready_read(self) -> None:
+        data = bytes(self._socket.readAll().data())
+        if not self.secure and not self._started:
+            self._on_connected()  # données reçues avant le tour de boucle différé
+        if not self._received_any and data:
+            self._received_any = True
+            if data[:1] == b"{":
+                # Présentation JSON en clair : pair en protocole 3 ou plus ancien.
+                self._fail(OLD_VERSION_ERROR)
+                return
         try:
-            messages = self._decoder.feed(bytes(self._socket.readAll().data()))
+            for message in self._frames.feed(data):
+                if self._finished:
+                    return
+                if self.secure:
+                    self._receive(self._noise.receive.decrypt(b"", message))
+                else:
+                    self._handshake(message)
+        except noise.NoiseError as exc:
+            log.warning("Chiffrement impossible avec %s : %s", self.peer_address, exc)
+            self._fail(f"Connexion chiffrée impossible : {exc}")
         except ProtocolError as exc:
             log.warning("Erreur de protocole avec %s : %s", self.peer_address, exc)
             self._fail(f"Données invalides reçues : {exc}")
-            return
-        for message in messages:
+
+    def _handshake(self, message: bytes) -> None:
+        self._noise.read_message(message)
+        if self._noise.my_turn:
+            self._socket.write(noise.frame(self._noise.write_message()))
+        if self.secure:
+            self._send_hello()
+
+    def _receive(self, plaintext: bytes) -> None:
+        for message in self._decoder.feed(plaintext):
             if self._finished:
                 return
             self._handle(message)
@@ -200,10 +261,6 @@ class PeerConnection(QObject):
                 return  # présentation en double : ignorée
             self._handshake_timer.stop()
             self._peer_id, self._peer_name = message.id, message.name
-            # Sur une connexion acceptée, notre présentation est différée d'un tour de
-            # boucle : si celle du pair arrive avant, on l'envoie maintenant, avant que
-            # quoi que ce soit d'autre ne parte (le pair couperait la connexion).
-            self._send_hello()
             log.info("Pair prêt : %s (%s)", message.name, self.peer_address)
             self.ready.emit(message.id, message.name, message.port)
         elif message.type is MessageType.BYE:

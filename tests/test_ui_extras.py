@@ -259,3 +259,55 @@ def test_open_missing_file_reports_error(qtbot, windows, tmp_path):
     alice.conversation.message_error.connect(errors.append)
     alice.conversation.handle_action(record.id, "open")
     assert errors and "introuvable" in errors[0]
+
+
+# -- Sécurité -----------------------------------------------------------------
+def test_safety_number_is_the_same_on_both_sides(qtbot, windows):
+    alice, bob = windows
+    dialogs = []
+    for window in (alice, bob):
+        window.conversation.open_dialog = dialogs.append
+        window.conversation.lock_button.click()
+    assert len(dialogs) == 2
+    assert dialogs[0].number is not None and dialogs[0].number == dialogs[1].number
+    assert len(dialogs[0].number.split()) == 12
+
+
+def test_changed_key_banner_then_accept(qtbot, windows, make_messenger):
+    from socket_chat.noise import KeyPair
+
+    alice, bob = windows
+    conv = alice.conversation
+    bob_id = bob.messenger.user_id
+    assert conv.changed_banner.isHidden()
+    with qtbot.waitSignal(alice.messenger.presence_changed, timeout=TIMEOUT):
+        bob.messenger.stop()
+    other = make_messenger("Bob", user_id=bob_id, identity=KeyPair.generate())
+    with qtbot.waitSignal(alice.messenger.key_changed, timeout=TIMEOUT):
+        other.add_contact("127.0.0.1", alice.messenger.port)
+    qtbot.waitUntil(lambda: conv.changed_banner.isVisible(), timeout=TIMEOUT)
+    assert "a changé" in conv.changed_banner.label.text()
+
+    questions = []
+    conv.confirm = lambda title, text: questions.append(text) or False
+    conv.changed_banner.accept_button.click()
+    assert len(questions) == 1 and "Nouveau code de sécurité" in questions[0]
+    assert alice.messenger.store.contact(bob_id).pending_key is not None  # refusé
+
+    conv.confirm = lambda title, text: True
+    alice.messenger.store.upsert_contact(bob_id, "Bob", host="127.0.0.1", port=other.port)
+    with qtbot.waitSignal(alice.messenger.presence_changed, timeout=TIMEOUT):
+        conv.changed_banner.accept_button.click()
+    qtbot.waitUntil(lambda: conv.changed_banner.isHidden(), timeout=TIMEOUT)
+    assert alice.messenger.contact_key(bob_id) == other.identity.public
+
+
+def test_refused_key_banner(qtbot, windows):
+    alice, _bob = windows
+    conv = alice.conversation
+    contact = conv.contact_id
+    alice.messenger.key_refused.emit(contact, True)
+    assert conv.refused_banner.isVisible()
+    assert "ne reconnaît pas encore" in conv.refused_banner.label.text()
+    alice.messenger.key_refused.emit(contact, False)
+    assert conv.refused_banner.isHidden()

@@ -148,7 +148,7 @@ void main() {
     expect(state(carol, record.id), FileState.failed);
     await waitState(alice, record.id, FileState.failed);
 
-    final carol2 = await messengers.make('Carol', userId: carolId, store: bobStore);
+    final carol2 = await messengers.make('Carol', userId: carolId, store: bobStore, identity: carol.identity);
     final back = next(carol2.presenceChanged);
     alice.onPeerSeen(carolId, 'Carol', '127.0.0.1', carol2.port!);
     alice.connectTo(carolId);

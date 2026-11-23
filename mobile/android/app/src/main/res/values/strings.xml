@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="allowed_networks_title">Réseaux autorisés</string>
+    <string name="allowed_networks_description">Réseaux (CIDR séparés par des virgules, par exemple 10.20.0.0/16, 192.168.1.0/24) avec lesquels Socket Chat accepte de communiquer. Vide : aucune restriction.</string>
+</resources>

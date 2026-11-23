@@ -1,7 +1,12 @@
-"""Protocole d'échange entre deux instances de Socket Chat (version 2).
+"""Protocole d'échange entre deux instances de Socket Chat (version 4).
 
 Connexions TCP
 --------------
+Chaque connexion commence par une poignée de main Noise XX (voir ``noise`` et
+``identity``) : messages binaires préfixés par leur longueur sur 2 octets. Tout ce qui
+suit est chiffré (ChaCha20-Poly1305) : le flux déchiffré transporte les trames
+ci-dessous.
+
 Chaque trame est un objet JSON encodé en UTF-8 sur une seule ligne, terminé
 par ``\\n`` (format « JSON Lines »). Les retours à la ligne présents dans les
 messages sont échappés par JSON : une trame ne s'étend jamais sur plusieurs
@@ -45,7 +50,7 @@ import uuid
 from dataclasses import dataclass
 from enum import StrEnum
 
-PROTOCOL_VERSION = 3
+PROTOCOL_VERSION = 4
 DEFAULT_PORT = 12800
 DISCOVERY_PORT = 12801
 

@@ -15,7 +15,10 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtNetwork import QHostAddress, QTcpServer, QTcpSocket
 
+from . import noise
 from .discovery import Discovery
+from .identity import decode_key, encode_key, fingerprint
+from .netpolicy import Network, is_allowed
 from .network import PeerConnection
 from .protocol import (
     MAX_EMOJI_LENGTH,
@@ -43,6 +46,21 @@ RETRY_INTERVAL_MS = 30_000
 DUPLICATE_REASON = "duplicate"
 SELF_REASON = "self"
 SELF_ERROR = "Cette adresse est celle de votre propre poste."
+NETWORK_REASON = "network"
+NETWORK_ERROR = (
+    "Ce poste est hors des réseaux autorisés par l'administrateur "
+    "(réglage network/allowed_networks)."
+)
+#: Clé présentée différente de la clé épinglée : connexion refusée.
+KEY_REASON = "key"
+KEY_ERROR = (
+    "La clé de sécurité de ce contact a changé : connexion refusée. Vérifiez avec cette "
+    "personne (réinstallation ?) puis acceptez la nouvelle clé dans votre conversation."
+)
+KEY_REFUSED_ERROR = (
+    "Ce contact a refusé la connexion : il connaît une autre clé de sécurité pour ce "
+    "poste. Votre nouvelle clé doit être acceptée de son côté, dans votre conversation."
+)
 
 _ACK_TO_STATUS = {AckStatus.DELIVERED: Status.DELIVERED, AckStatus.READ: Status.READ}
 
@@ -55,18 +73,31 @@ class Messenger(QObject):
     file_progress = Signal(str, int, int)  # identifiant, octets transférés, taille
     typing_changed = Signal(str, bool)  # contact, en train d'écrire
     presence_changed = Signal(str, bool)  # contact, en ligne
+    key_changed = Signal(str)  # contact dont une nouvelle clé attend d'être acceptée
+    key_refused = Signal(str, bool)  # contact, refuse notre clé (il en connaît une autre)
     error = Signal(str)
 
-    def __init__(self, store: Store, user_id: str, name: str, parent: QObject | None = None):
+    def __init__(
+        self,
+        store: Store,
+        user_id: str,
+        name: str,
+        identity: noise.KeyPair | None = None,
+        parent: QObject | None = None,
+    ):
         super().__init__(parent)
         self.store = store
         self.user_id = user_id
+        #: Clé du poste (``identity.load_or_create``) ; éphémère si absente (tests).
+        self.identity = identity or noise.KeyPair.generate()
         self._name = validate_name(name)
         self._server: QTcpServer | None = None
         self._connections: dict[str, PeerConnection] = {}  # contacts identifiés
         self._pending: set[PeerConnection] = set()  # présentation pas encore reçue
         self._dialing: dict[str, PeerConnection] = {}  # connexions sortantes par contact
         self._manual: set[PeerConnection] = set()  # ajouts par adresse (erreurs affichées)
+        self._manual_ready: set[PeerConnection] = set()  # ajouts par adresse, identifiés
+        self._refused_by: set[str] = set()  # contacts qui refusent notre clé (déjà signalés)
         self._discovered: set[str] = set()
         self._typing_timers: dict[str, QTimer] = {}
         self._typing: set[str] = set()  # contacts en train d'écrire
@@ -74,6 +105,8 @@ class Messenger(QObject):
         # Envois en attente d'une connexion : réactions et refus de fichiers.
         self._pending_reactions: dict[str, dict[str, str]] = {}
         self._pending_declines: dict[str, set[str]] = {}
+        #: Réseaux autorisés (``netpolicy``) ; liste vide : aucune restriction.
+        self.allowed_networks: list[Network] = []
 
         self.transfers = FileTransfers(store, self)
         self.transfers.changed.connect(self._on_transfer_changed)
@@ -284,6 +317,49 @@ class Messenger(QObject):
             return
         self._dialing[contact_id] = self._dial(contact.host, contact.port)
 
+    # -- Clés des contacts --------------------------------------------------
+    def _check_key(self, peer_id: str, key: bytes) -> bool:
+        """Vrai si ``key`` est la clé épinglée du contact (ou s'il n'en a pas encore)."""
+        contact = self.store.contact(peer_id)
+        if contact is None or contact.public_key is None:
+            return True
+        encoded = encode_key(key)
+        if encoded == contact.public_key:
+            if contact.pending_key is not None:
+                self.store.set_pending_key(peer_id, None)  # fausse alerte : clé d'origine
+                self.key_changed.emit(peer_id)
+            return True
+        log.warning(
+            "Clé de %s différente de la clé épinglée (%s) : connexion refusée",
+            contact.name,
+            fingerprint(key),
+        )
+        if self.store.set_pending_key(peer_id, encoded):
+            self.key_changed.emit(peer_id)
+        return False
+
+    def trust_new_key(self, contact_id: str) -> None:
+        """L'utilisateur accepte la nouvelle clé présentée par ce contact."""
+        contact = self.store.contact(contact_id)
+        if contact is None or contact.pending_key is None:
+            return
+        self.store.pin_key(contact_id, contact.pending_key)
+        log.info("Nouvelle clé de %s acceptée", contact.name)
+        self.key_changed.emit(contact_id)
+        # Une tentative en cours (vers une adresse obsolète, qui peut traîner plusieurs
+        # secondes sous Windows) empêcherait de reconnecter tout de suite.
+        stale = self._dialing.pop(contact_id, None)
+        if stale is not None:
+            stale.abort("Nouvelle clé acceptée")
+        self.connect_to(contact_id)
+
+    def contact_key(self, contact_id: str) -> bytes | None:
+        """Clé épinglée du contact (``None`` s'il ne s'est jamais connecté en version 4)."""
+        contact = self.store.contact(contact_id)
+        if contact is None or contact.public_key is None:
+            return None
+        return decode_key(contact.public_key)
+
     # -- Détection (reliée à Discovery) ----------------------------------
     def attach_discovery(self, discovery: Discovery) -> None:
         discovery.peer_seen.connect(self.on_peer_seen)
@@ -293,6 +369,10 @@ class Messenger(QObject):
         if contact_id == self.user_id:
             return
         previous = self.store.contact(contact_id)
+        if previous is not None and previous.public_key:
+            # Annonce non authentifiée : le nom d'un contact vérifié ne change que par sa
+            # présentation chiffrée (sinon n'importe qui pourrait le renommer).
+            name = previous.name
         self.store.upsert_contact(contact_id, name, host=host, port=port, last_seen=now_ms())
         moved = previous is not None and (previous.host, previous.port) != (host, port)
         stale = self._dialing.get(contact_id)
@@ -323,7 +403,9 @@ class Messenger(QObject):
         return Message.hello(self.user_id, self._name, self.port or 0)
 
     def _dial(self, host: str, port: int) -> PeerConnection:
-        conn = PeerConnection(QTcpSocket(), self._hello(), outgoing=True, parent=self)
+        conn = PeerConnection(
+            QTcpSocket(), self._hello(), outgoing=True, identity=self.identity, parent=self
+        )
         self._watch(conn)
         log.info("Connexion à %s:%d", host, port)
         conn.connect_to_host(host, port)
@@ -333,8 +415,17 @@ class Messenger(QObject):
         assert self._server is not None
         while self._server.hasPendingConnections():
             socket = self._server.nextPendingConnection()
-            log.info("Connexion entrante de %s", socket.peerAddress().toString())
-            self._watch(PeerConnection(socket, self._hello(), outgoing=False, parent=self))
+            address = socket.peerAddress().toString()
+            if not is_allowed(address, self.allowed_networks):
+                log.warning("Connexion refusée : %s hors des réseaux autorisés", address)
+                socket.abort()
+                socket.deleteLater()
+                continue
+            log.info("Connexion entrante de %s", address)
+            conn = PeerConnection(
+                socket, self._hello(), outgoing=False, identity=self.identity, parent=self
+            )
+            self._watch(conn)
 
     def _watch(self, conn: PeerConnection) -> None:
         self._pending.add(conn)
@@ -349,12 +440,28 @@ class Messenger(QObject):
         self._manual.discard(conn)
         if self._dialing.get(peer_id) is conn:
             del self._dialing[peer_id]
-        if peer_id == self.user_id:
+        if not is_allowed(conn.peer_address, self.allowed_networks):
+            # Connexion sortante vers un nom d'hôte résolu hors des réseaux autorisés.
+            log.warning("Connexion fermée : %s hors des réseaux autorisés", conn.peer_address)
+            conn.abort(NETWORK_REASON)
+            if manual:
+                self.error.emit(NETWORK_ERROR)
+            return
+        key = conn.peer_key
+        assert key is not None
+        if peer_id == self.user_id or key == self.identity.public:
             log.info("Connexion à soi-même ignorée")
             conn.close(SELF_REASON)
             if manual:
                 self.error.emit(SELF_ERROR)
             return
+        if not self._check_key(peer_id, key):
+            conn.close(KEY_REASON)
+            if manual:
+                self.error.emit(KEY_ERROR)
+            return
+        if manual:
+            self._manual_ready.add(conn)
 
         existing = self._connections.get(peer_id)
         if existing is not None and existing is not conn:
@@ -373,6 +480,10 @@ class Messenger(QObject):
         was_known = self.store.contact(peer_id) is not None
         host = conn.peer_address.removeprefix("::ffff:")
         self.store.upsert_contact(peer_id, name, host=host, port=port, last_seen=now_ms())
+        if not was_known or self.store.contact(peer_id).public_key is None:
+            # Premier contact chiffré : la clé est épinglée (confiance au premier usage).
+            self.store.pin_key(peer_id, encode_key(key))
+            log.info("Clé de %s épinglée : %s", name, fingerprint(key))
         if existing is None and peer_id not in self._discovered:
             self.presence_changed.emit(peer_id, True)
         if not was_known:
@@ -389,6 +500,10 @@ class Messenger(QObject):
         peer_id = conn.peer_id
         if peer_id is None or self._connections.get(peer_id) is not conn:
             return
+        if peer_id in self._refused_by:
+            # Le contact nous parle : il a accepté notre nouvelle clé.
+            self._refused_by.discard(peer_id)
+            self.key_refused.emit(peer_id, False)
         match message.type:
             case MessageType.CHAT | MessageType.FILE_OFFER:
                 self._receive_chat(conn, peer_id, message)
@@ -456,8 +571,17 @@ class Messenger(QObject):
             self._manual.discard(conn)
             if reason == SELF_REASON:
                 self.error.emit(SELF_ERROR)
+            elif reason == KEY_REASON:
+                self.error.emit(KEY_REFUSED_ERROR)
             else:
                 self.error.emit(f"Impossible de joindre ce poste : {reason or 'connexion fermée.'}")
+        if reason == KEY_REASON and conn.peer_id is not None:
+            if conn in self._manual_ready:
+                self.error.emit(KEY_REFUSED_ERROR)
+            if conn.peer_id not in self._refused_by:
+                self._refused_by.add(conn.peer_id)
+                self.key_refused.emit(conn.peer_id, True)
+        self._manual_ready.discard(conn)
         peer_id = conn.peer_id
         if peer_id is not None and self._connections.get(peer_id) is conn:
             del self._connections[peer_id]

@@ -86,7 +86,7 @@ def test_offline_messages_are_queued_then_delivered(qtbot, make_messenger, tmp_p
     assert status(alice, record.id) is Status.PENDING
 
     # Bob revient (même identité, même historique, nouveau port) et est détecté.
-    bob2 = make_messenger("Bob", user_id=bob_id, store=bob_store)
+    bob2 = make_messenger("Bob", user_id=bob_id, store=bob_store, identity=bob.identity)
     with qtbot.waitSignal(bob2.message_added, timeout=TIMEOUT) as blocker:
         alice.on_peer_seen(bob_id, "Bob", "127.0.0.1", bob2.port)
     assert blocker.args[0].text == "Tu verras ça en revenant"
@@ -161,6 +161,7 @@ def test_self_connection_error_whatever_the_event_order(make_messenger, bye_firs
         outgoing = True
         peer_id = None
         peer_address = "127.0.0.1"
+        peer_key = bytes(range(32))
 
         def close(self, reason=""):
             pass
@@ -210,6 +211,161 @@ def test_new_address_replaces_stale_connection_attempt(qtbot, make_messenger):
 
     with qtbot.waitSignal(bob.message_added, timeout=2000) as blocker:
         alice.on_peer_seen(bob.user_id, "Bob", "127.0.0.1", bob.port)
+    assert blocker.args[0].id == record.id
+    black_hole.close()
+    black_hole.deleteLater()
+
+
+@pytest.fixture
+def strict_networks(monkeypatch):
+    """Toute adresse est « extérieure » dès qu'une liste de réseaux est fixée.
+
+    La boucle locale étant toujours permise par netpolicy, on simule ici des postes
+    situés hors des réseaux autorisés.
+    """
+    monkeypatch.setattr(messenger_module, "is_allowed", lambda address, networks: not networks)
+    return ["10.20.0.0/16"]
+
+
+def test_incoming_connection_outside_allowed_networks_is_refused(
+    qtbot, make_messenger, strict_networks
+):
+    alice, bob = make_messenger("Alice"), make_messenger("Bob")
+    bob.allowed_networks = strict_networks
+    with qtbot.waitSignal(alice.error, timeout=TIMEOUT) as blocker:
+        alice.add_contact("127.0.0.1", bob.port)
+    assert "Impossible de joindre" in blocker.args[0]
+    assert alice.store.contacts() == [] and bob.store.contacts() == []
+
+
+def test_outgoing_connection_outside_allowed_networks_is_closed(
+    qtbot, make_messenger, strict_networks
+):
+    alice, bob = make_messenger("Alice"), make_messenger("Bob")
+    alice.allowed_networks = strict_networks
+    with qtbot.waitSignal(alice.error, timeout=TIMEOUT) as blocker:
+        alice.add_contact("127.0.0.1", bob.port)
+    assert blocker.args[0] == messenger_module.NETWORK_ERROR
+    qtbot.wait(200)
+    assert alice.store.contacts() == [] and not alice.is_online(bob.user_id)
+
+
+# -- Clés de sécurité (protocole 4) ------------------------------------------------------
+def test_first_contact_pins_both_keys(qtbot, make_messenger):
+    from socket_chat.identity import encode_key
+
+    alice, bob = make_messenger("Alice"), make_messenger("Bob")
+    link(qtbot, alice, bob)
+    assert alice.store.contact(bob.user_id).public_key == encode_key(bob.identity.public)
+    assert bob.store.contact(alice.user_id).public_key == encode_key(alice.identity.public)
+    assert alice.contact_key(bob.user_id) == bob.identity.public
+    assert alice.contact_key("11111111-1111-4111-8111-111111111111") is None
+
+
+def test_changed_key_is_refused_until_accepted(qtbot, make_messenger, tmp_path):
+    from socket_chat.identity import encode_key
+    from socket_chat.noise import KeyPair
+
+    alice, bob = make_messenger("Alice"), make_messenger("Bob")
+    bob_id = bob.user_id
+    link(qtbot, alice, bob)
+    with qtbot.waitSignal(alice.presence_changed, timeout=TIMEOUT):
+        bob.stop()
+
+    # Même identifiant, autre clé : réinstallation… ou usurpation.
+    impostor_keys = KeyPair.generate()
+    impostor = make_messenger("Bob", user_id=bob_id, identity=impostor_keys)
+    record = alice.send(bob_id, "secret")
+    refused, errors = [], []
+    impostor.key_refused.connect(lambda *args: refused.append(args))
+    impostor.error.connect(errors.append)
+    with qtbot.waitSignal(alice.key_changed, timeout=TIMEOUT) as blocker:
+        impostor.add_contact("127.0.0.1", alice.port)
+    assert blocker.args == [bob_id]
+    qtbot.waitUntil(lambda: refused == [(alice.user_id, True)], timeout=TIMEOUT)
+    assert errors == [messenger_module.KEY_REFUSED_ERROR]  # ajout manuel : expliqué
+    contact = alice.store.contact(bob_id)
+    assert contact.public_key == encode_key(bob.identity.public)
+    assert contact.pending_key == encode_key(impostor_keys.public)
+    assert not alice.is_online(bob_id)
+    assert impostor.store.messages(alice.user_id) == []  # rien n'a fui
+    assert status(alice, record.id) is Status.PENDING
+
+    # Alice vérifie avec Bob et accepte : la connexion s'établit, le message part.
+    alice.store.upsert_contact(bob_id, "Bob", host="127.0.0.1", port=impostor.port)
+    with qtbot.waitSignal(impostor.message_added, timeout=TIMEOUT) as blocker:
+        alice.trust_new_key(bob_id)
+    assert blocker.args[0].text == "secret"
+    qtbot.waitUntil(lambda: refused[-1] == (alice.user_id, False), timeout=TIMEOUT)
+    contact = alice.store.contact(bob_id)
+    assert contact.public_key == encode_key(impostor_keys.public)
+    assert contact.pending_key is None
+
+
+def test_manual_connection_to_changed_key_explains(qtbot, make_messenger):
+    from socket_chat.noise import KeyPair
+
+    alice, bob = make_messenger("Alice"), make_messenger("Bob")
+    link(qtbot, alice, bob)
+    with qtbot.waitSignal(alice.presence_changed, timeout=TIMEOUT):
+        bob.stop()
+    other = make_messenger("Bob", user_id=bob.user_id, identity=KeyPair.generate())
+    with qtbot.waitSignal(alice.error, timeout=TIMEOUT) as blocker:
+        alice.add_contact("127.0.0.1", other.port)
+    assert blocker.args[0] == messenger_module.KEY_ERROR
+
+
+def test_announcement_cannot_rename_verified_contact(qtbot, make_messenger):
+    alice, bob = make_messenger("Alice"), make_messenger("Bob")
+    link(qtbot, alice, bob)
+    alice.on_peer_seen(bob.user_id, "Usurpateur", "127.0.0.1", bob.port)
+    assert alice.store.contact(bob.user_id).name == "Bob"
+    # Un contact jamais vérifié (simple annonce) prend le nom annoncé.
+    unknown = "22222222-2222-4222-8222-222222222222"
+    alice.on_peer_seen(unknown, "Claire", "127.0.0.1", 1)
+    alice.on_peer_seen(unknown, "Claire D.", "127.0.0.1", 1)
+    assert alice.store.contact(unknown).name == "Claire D."
+
+
+def test_traffic_is_encrypted_on_the_wire(qtbot, make_messenger, monkeypatch):
+    """Aucun texte en clair ne quitte le poste."""
+    from socket_chat import network
+
+    sent = []
+    original = network.QTcpSocket.write
+
+    def spy(self, data):
+        sent.append(bytes(data))
+        return original(self, data)
+
+    monkeypatch.setattr(network.QTcpSocket, "write", spy)
+    alice, bob = make_messenger("Alice"), make_messenger("Bob")
+    link(qtbot, alice, bob)
+    with qtbot.waitSignal(bob.message_added, timeout=TIMEOUT):
+        alice.send(bob.user_id, "Mot de passe du coffre : 1234")
+    wire = b"".join(sent)
+    assert wire
+    for clear in (b"Mot de passe", b"Alice", b"hello", alice.user_id.encode()):
+        assert clear not in wire
+
+
+def test_accepting_new_key_replaces_stale_connection_attempt(qtbot, make_messenger):
+    """Régression (Windows) : une tentative qui traîne ne doit pas retarder la reconnexion."""
+    from socket_chat.identity import encode_key
+    from socket_chat.noise import KeyPair
+
+    black_hole = QTcpServer()
+    assert black_hole.listen(QHostAddress(QHostAddress.SpecialAddress.LocalHost), 0)
+    alice, bob = make_messenger("Alice"), make_messenger("Bob")
+    alice.store.upsert_contact(bob.user_id, "Bob", host="127.0.0.1", port=black_hole.serverPort())
+    alice.store.pin_key(bob.user_id, encode_key(KeyPair.generate().public))  # ancienne clé
+    alice.store.set_pending_key(bob.user_id, encode_key(bob.identity.public))
+    record = alice.send(bob.user_id, "Tu es là ?")  # tentative vers l'ancienne adresse
+    assert bob.user_id in alice._dialing
+
+    alice.store.upsert_contact(bob.user_id, "Bob", host="127.0.0.1", port=bob.port)
+    with qtbot.waitSignal(bob.message_added, timeout=2000) as blocker:
+        alice.trust_new_key(bob.user_id)
     assert blocker.args[0].id == record.id
     black_hole.close()
     black_hole.deleteLater()

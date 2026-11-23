@@ -26,6 +26,19 @@ class NetworkPlatform {
     }
   }
 
+  /// Réseaux autorisés imposés par l'administrateur (configuration gérée par MDM,
+  /// clé « allowed_networks ») ; `null` si aucune.
+  Future<String?> managedAllowedNetworks() async {
+    try {
+      final value = await _channel.invokeMethod<String>('managedAllowedNetworks');
+      return value == null || value.trim().isEmpty ? null : value;
+    } on MissingPluginException {
+      return null;
+    } on PlatformException {
+      return null;
+    }
+  }
+
   Future<void> _call(String method) async {
     try {
       await _channel.invokeMethod<void>(method);

@@ -19,6 +19,7 @@ from PySide6.QtNetwork import (
     QUdpSocket,
 )
 
+from .netpolicy import Network, is_allowed
 from .protocol import (
     DISCOVERY_PORT,
     MAX_DATAGRAM_SIZE,
@@ -78,6 +79,8 @@ class Discovery(QObject):
         self._udp_port = udp_port
         #: Destinataires des annonces ; ``None`` = diffusion sur toutes les interfaces.
         self.targets = targets
+        #: Réseaux autorisés (``netpolicy``) ; liste vide : aucune restriction.
+        self.allowed_networks: list[Network] = []
         self._socket: QUdpSocket | None = None
         self._peers: dict[str, float] = {}  # identifiant -> dernière annonce (monotonic)
 
@@ -145,6 +148,10 @@ class Discovery(QObject):
         assert self._socket is not None
         while self._socket.hasPendingDatagrams():
             datagram = self._socket.receiveDatagram(MAX_DATAGRAM_SIZE + 1)
+            sender = datagram.senderAddress().toString()
+            if not is_allowed(sender, self.allowed_networks):
+                log.debug("Annonce ignorée : %s hors des réseaux autorisés", sender)
+                continue
             try:
                 announcement = decode_announce(bytes(datagram.data().data()))
             except ProtocolError as exc:
@@ -158,7 +165,7 @@ class Discovery(QObject):
                 continue
             is_new = announcement.id not in self._peers
             self._peers[announcement.id] = time.monotonic()
-            host = datagram.senderAddress().toString().removeprefix("::ffff:")
+            host = sender.removeprefix("::ffff:")
             self.peer_seen.emit(announcement.id, announcement.name, host, announcement.port)
             if is_new:
                 self.announce()  # le nouveau venu nous découvre sans attendre

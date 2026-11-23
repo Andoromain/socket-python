@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../core/signal.dart';
 import '../net/discovery.dart';
 import '../net/messenger.dart';
+import '../net/netpolicy.dart';
 import '../protocol/protocol.dart';
 import '../store/store.dart';
 import 'platform.dart';
@@ -22,7 +23,7 @@ class ChatController extends ChangeNotifier {
     this.platform = const NetworkPlatform(),
     this.useDiscovery = true,
     this.useNetwork = true,
-  }) : messenger = Messenger(store, settings.userId, settings.name ?? 'Android') {
+  }) : messenger = Messenger(store, settings.userId, settings.name ?? 'Android', identity: settings.identity) {
     messenger.contactsChanged.connect((_) => _changed());
     messenger.messageAdded.connect(_onMessageAdded);
     messenger.messageStatusChanged.connect((_) => _changed());
@@ -30,6 +31,8 @@ class ChatController extends ChangeNotifier {
     messenger.fileProgress.connect((_) => _changed());
     messenger.typingChanged.connect((_) => _changed());
     messenger.presenceChanged.connect((_) => _changed());
+    messenger.keyChanged.connect((_) => _changed());
+    messenger.keyRefused.connect((_) => _changed());
     messenger.error.connect(errors.emit);
   }
 
@@ -49,6 +52,27 @@ class ChatController extends ChangeNotifier {
   /// Erreur de démarrage persistante (port occupé…), affichée en bandeau.
   String? startError;
 
+  /// Réseaux autorisés imposés par l'administrateur (MDM) ; `null` si aucun.
+  String? managedNetworks;
+
+  /// Réseaux autorisés en vigueur (administrateur, sinon préférences).
+  String get allowedNetworks => managedNetworks ?? settings.allowedNetworks;
+
+  void _applyNetworks() {
+    final networks = parseNetworks(allowedNetworks);
+    messenger.allowedNetworks = networks;
+    _discovery?.allowedNetworks = networks;
+  }
+
+  /// Information importante à afficher en bandeau jusqu'à ce que l'utilisateur la ferme
+  /// (historique illisible mis de côté…).
+  String? notice;
+
+  void dismissNotice() {
+    notice = null;
+    notifyListeners();
+  }
+
   /// Conversation à l'écran, marquée comme lue au fil de l'eau.
   String? _openContact;
   bool _visible = true;
@@ -66,6 +90,8 @@ class ChatController extends ChangeNotifier {
       return;
     }
     startError = null;
+    managedNetworks = await platform.managedAllowedNetworks();
+    _applyNetworks();
     String? failure;
     void capture(String message) => failure = message;
     messenger.error.connect(capture);
@@ -87,6 +113,7 @@ class ChatController extends ChangeNotifier {
       if (await discovery.start()) {
         messenger.attachDiscovery(discovery);
         _discovery = discovery;
+        _applyNetworks();
       }
     }
     notifyListeners();
@@ -100,12 +127,14 @@ class ChatController extends ChangeNotifier {
   }
 
   /// Premier lancement ou changement de préférences.
-  Future<void> applySettings({required String name, required int port}) async {
+  Future<void> applySettings({required String name, required int port, String? allowedNetworks}) async {
     final normalized = validateName(name);
     final portChanged = port != settings.port;
     settings
       ..name = normalized
       ..port = port;
+    if (allowedNetworks != null) settings.allowedNetworks = allowedNetworks.trim();
+    _applyNetworks();
     await settings.save();
     messenger.name = normalized;
     _discovery?.setName(normalized);

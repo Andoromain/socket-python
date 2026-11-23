@@ -1,12 +1,14 @@
 """Mise à jour automatique.
 
 Les installeurs sont publiés avec un fichier ``latest.json`` dans les Releases du
-dépôt GitHub public du projet. L'application lit ce manifeste, compare la
-version, télécharge le fichier de sa plate-forme, vérifie taille et SHA-256, puis
-lance l'installation silencieuse qui la relance ensuite.
+dépôt GitHub public du projet. L'application lit ce manifeste, vérifie sa signature
+Ed25519 (``latest.json.sig``, voir ``signing``), compare la version, télécharge le
+fichier de sa plate-forme, vérifie taille et SHA-256, puis lance l'installation
+silencieuse qui la relance ensuite. Un manifeste sans signature valide est refusé.
 
 La source est configurable (clé ``update/url``) : adresse HTTPS, ``file://`` ou chemin
-de dossier réseau, pour héberger les mises à jour ailleurs sans nouvelle version.
+de dossier réseau, pour héberger les mises à jour ailleurs sans nouvelle version
+(copier ``latest.json``, ``latest.json.sig`` et les installeurs, sans les modifier).
 """
 
 from __future__ import annotations
@@ -22,7 +24,7 @@ import tarfile
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import quote, urljoin
+from urllib.parse import quote, unquote, urljoin
 
 from PySide6.QtCore import QObject, QProcess, QTimer, QUrl, Signal
 from PySide6.QtNetwork import (
@@ -32,6 +34,7 @@ from PySide6.QtNetwork import (
     QNetworkRequest,
 )
 
+from . import signing
 from .protocol import safe_file_name
 
 log = logging.getLogger(__name__)
@@ -160,6 +163,23 @@ def asset_base(manifest_url: str, version: str) -> str:
     return manifest_url
 
 
+def signature_url(manifest_url: str, version: str) -> str:
+    """Adresse de la signature du manifeste de ``version`` (à côté de ses fichiers)."""
+    name = unquote(manifest_url.rsplit("/", 1)[-1]) + signing.SIGNATURE_SUFFIX
+    return urljoin(asset_base(manifest_url, version), quote(name))
+
+
+def verify_manifest(data: bytes, signature: bytes) -> None:
+    """Lève ``ManifestError`` si la signature du manifeste n'est pas valide."""
+    try:
+        signing.verify(data, signature)
+    except signing.SignatureError as exc:
+        raise ManifestError(
+            f"signature invalide ({exc}) : cette mise à jour ne vient pas de Socket Chat, "
+            "elle est refusée."
+        ) from exc
+
+
 def normalize_source(source: str) -> str:
     """Accepte une URL ou un chemin (``\\\\serveur\\partage\\latest.json``, ``/srv/maj``)."""
     source = source.strip()
@@ -208,6 +228,8 @@ class UpdateChecker(QObject):
         #: Vrai si la dernière vérification a été demandée par l'utilisateur.
         self.manual = False
         self._reply: QNetworkReply | None = None
+        #: Manifeste lu, en attente de la vérification de sa signature.
+        self._pending: tuple[bytes, Manifest] | None = None
         self._manager = _network_manager(self)
         self._timer = QTimer(self, singleShot=True)
         self._timer.timeout.connect(self.check_now)
@@ -234,19 +256,47 @@ class UpdateChecker(QObject):
         self._reply = self._manager.get(_request(self.url))
         self._reply.finished.connect(self._on_finished)
 
-    def _on_finished(self) -> None:
+    def _take_reply(self, what: str) -> bytes | None:
+        """Contenu de la réponse terminée, ou ``None`` (échec déjà signalé)."""
         reply, self._reply = self._reply, None
         assert reply is not None
         reply.deleteLater()
         if reply.error() != QNetworkReply.NetworkError.NoError:
-            log.info("Mise à jour : vérification impossible (%s)", reply.errorString())
+            log.info("Mise à jour : %s impossible (%s)", what, reply.errorString())
             self.failed.emit(f"Impossible de vérifier les mises à jour : {reply.errorString()}")
+            return None
+        return bytes(reply.readAll().data())
+
+    def _invalid(self, exc: ManifestError) -> None:
+        log.warning("Manifeste de mise à jour invalide : %s", exc)
+        self.failed.emit(f"Manifeste de mise à jour invalide : {exc}")
+
+    def _on_finished(self) -> None:
+        data = self._take_reply("vérification")
+        if data is None:
             return
         try:
-            manifest = parse_manifest(bytes(reply.readAll().data()), self.url)
+            manifest = parse_manifest(data, self.url)
+            url = signature_url(self.url, manifest.version)
+            check_scheme(url)
         except ManifestError as exc:
-            log.warning("Manifeste de mise à jour invalide : %s", exc)
-            self.failed.emit(f"Manifeste de mise à jour invalide : {exc}")
+            self._invalid(exc)
+            return
+        self._pending = (data, manifest)
+        self._reply = self._manager.get(_request(url))
+        self._reply.finished.connect(self._on_signature)
+
+    def _on_signature(self) -> None:
+        pending, self._pending = self._pending, None
+        assert pending is not None
+        signature = self._take_reply("lecture de la signature")
+        if signature is None:
+            return
+        data, manifest = pending
+        try:
+            verify_manifest(data, signature)
+        except ManifestError as exc:
+            self._invalid(exc)
             return
         self.latest = manifest
         if is_newer(manifest.version, self.current_version):
