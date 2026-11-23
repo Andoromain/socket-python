@@ -37,6 +37,12 @@ const int chunkSize = 32 * 1024;
 /// Taille maximale de l'aperçu d'une image (octets, avant base64).
 const int maxThumbSize = 32 * 1024;
 
+/// Taille maximale d'une photo de profil (octets, avant base64).
+const int maxAvatarSize = 32 * 1024;
+
+/// Signature d'un fichier JPEG (seul format accepté pour les photos de profil).
+const List<int> jpegMagic = [0xff, 0xd8, 0xff];
+
 /// Longueur maximale d'un nom de fichier (caractères).
 const int maxFileNameLength = 200;
 
@@ -62,6 +68,7 @@ enum MessageType {
   fileChunk('file_chunk'),
   fileEnd('file_end'),
   fileCancel('file_cancel'),
+  avatar('avatar'),
   bye('bye');
 
   const MessageType(this.wire);
@@ -203,6 +210,7 @@ class Message {
       Message(MessageType.fileEnd, id: messageId, sha256: sha256);
   factory Message.fileCancel(String messageId, [String reason = '']) =>
       Message(MessageType.fileCancel, id: messageId, reason: reason);
+  factory Message.avatar(Uint8List data) => Message(MessageType.avatar, data: data);
   factory Message.bye([String reason = '']) => Message(MessageType.bye, reason: reason);
 
   /// Représentation JSON, dans le même ordre de clés que la version Python.
@@ -231,6 +239,8 @@ class Message {
         return {'type': kind, 'id': id, 'sha256': sha256};
       case MessageType.fileCancel:
         return {'type': kind, 'id': id, 'reason': reason};
+      case MessageType.avatar:
+        return {'type': kind, 'data': base64Encode(data ?? Uint8List(0))};
       case MessageType.bye:
         return {'type': kind, 'reason': reason};
     }
@@ -410,10 +420,19 @@ Message? decode(List<int> line) {
     case MessageType.fileCancel:
       final reason = _requireStr(payload, 'reason', maxLength: 500);
       return Message.fileCancel(_requireId(payload), reason);
+    case MessageType.avatar:
+      if (!payload.containsKey('data')) throw ProtocolException('Champ « data » absent.');
+      final data = _requireBase64(payload, 'data', maxSize: maxAvatarSize);
+      if (data.isNotEmpty && !isJpeg(data)) throw ProtocolException('Photo de profil invalide (JPEG attendu).');
+      return Message.avatar(data);
     case MessageType.bye:
       return Message.bye(_requireStr(payload, 'reason', maxLength: 500));
   }
 }
+
+/// Vrai si [data] commence par la signature JPEG.
+bool isJpeg(List<int> data) =>
+    data.length >= jpegMagic.length && Iterable<int>.generate(jpegMagic.length).every((i) => data[i] == jpegMagic[i]);
 
 /// Décode un datagramme de détection (lève [ProtocolException] s'il est invalide).
 Announcement decodeAnnounce(List<int> datagram) {

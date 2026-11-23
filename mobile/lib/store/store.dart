@@ -15,7 +15,7 @@ import 'package:cryptography/dart.dart' as cd;
 import 'package:meta/meta.dart';
 import 'package:sqlite3/sqlite3.dart';
 
-const int schemaVersion = 3;
+const int schemaVersion = 4;
 
 const Set<String> imageExtensions = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'};
 
@@ -60,12 +60,16 @@ const Map<int, String> _migrations = {
     ALTER TABLE contacts ADD COLUMN public_key TEXT;
     ALTER TABLE contacts ADD COLUMN pending_key TEXT;
   ''',
+  // 4.0.2 : photo de profil de chaque contact (JPEG reçu par la trame « avatar »).
+  4: '''
+    ALTER TABLE contacts ADD COLUMN avatar BLOB;
+  ''',
 };
 
 /// Colonnes attendues après les migrations : ajoutées si elles manquent (historique dans
 /// un état inattendu, par exemple après une coupure pendant une mise à niveau).
 const Map<String, Map<String, String>> _requiredColumns = {
-  'contacts': {'public_key': 'TEXT', 'pending_key': 'TEXT'},
+  'contacts': {'public_key': 'TEXT', 'pending_key': 'TEXT', 'avatar': 'BLOB'},
   'messages': {
     'kind': "TEXT NOT NULL DEFAULT 'text'",
     'file_name': 'TEXT',
@@ -190,7 +194,16 @@ class FileInfo {
 }
 
 class Contact {
-  const Contact(this.id, this.name, {this.host, this.port, this.lastSeen = 0, this.publicKey, this.pendingKey});
+  const Contact(
+    this.id,
+    this.name, {
+    this.host,
+    this.port,
+    this.lastSeen = 0,
+    this.publicKey,
+    this.pendingKey,
+    this.avatar,
+  });
   final String id;
   final String name;
   final String? host;
@@ -202,6 +215,9 @@ class Contact {
 
   /// Clé différente présentée par ce contact, refusée en attendant l'utilisateur.
   final String? pendingKey;
+
+  /// Photo de profil (JPEG) ; `null` : initiales.
+  final Uint8List? avatar;
 }
 
 class MessageRecord {
@@ -451,6 +467,13 @@ class Store {
     return _db.updatedRows > 0;
   }
 
+  /// Enregistre la photo de profil du contact ; vrai si elle a changé.
+  bool setAvatar(String contactId, List<int> avatar) {
+    final value = avatar.isEmpty ? null : Uint8List.fromList(avatar);
+    _db.execute('UPDATE contacts SET avatar = ?1 WHERE id = ?2 AND avatar IS NOT ?1', [value, contactId]);
+    return _db.updatedRows > 0;
+  }
+
   Contact? contact(String contactId) {
     final rows = _db.select('SELECT * FROM contacts WHERE id = ?', [contactId]);
     return rows.isEmpty ? null : _contact(rows.first);
@@ -678,4 +701,5 @@ Contact _contact(Row row) => Contact(
   lastSeen: row['last_seen'] as int,
   publicKey: row['public_key'] as String?,
   pendingKey: row['pending_key'] as String?,
+  avatar: row['avatar'] as Uint8List?,
 );

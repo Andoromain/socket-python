@@ -24,6 +24,7 @@ class ChatController extends ChangeNotifier {
     this.useDiscovery = true,
     this.useNetwork = true,
   }) : messenger = Messenger(store, settings.userId, settings.name ?? 'Android', identity: settings.identity) {
+    messenger.setAvatar(settings.avatar);
     messenger.contactsChanged.connect((_) => _changed());
     messenger.messageAdded.connect(_onMessageAdded);
     messenger.messageStatusChanged.connect((_) => _changed());
@@ -127,6 +128,14 @@ class ChatController extends ChangeNotifier {
   }
 
   /// Premier lancement ou changement de préférences.
+  /// Change la photo de profil (vide : la retire), l'enregistre et l'envoie aux contacts.
+  Future<void> setAvatar(List<int> avatar) async {
+    settings.avatar = Uint8List.fromList(avatar);
+    await settings.save();
+    messenger.setAvatar(avatar);
+    notifyListeners();
+  }
+
   Future<void> applySettings({required String name, required int port, String? allowedNetworks}) async {
     final normalized = validateName(name);
     final portChanged = port != settings.port;

@@ -190,7 +190,7 @@ et `latest.json.sig`) **tels quels** : un manifeste modifié ou sans signature e
 | Copier un message | Clic droit sur la bulle |
 | Vérifier le chiffrement avec un collègue | Bouton 🔒 en haut de la conversation : comparer de vive voix (ou par téléphone) le code de sécurité affiché des deux côtés. Identiques : personne ne s'intercale entre vous |
 | « La clé de sécurité a changé » | Bandeau orange : le collègue a réinstallé Socket Chat ou changé de poste… ou quelqu'un tente d'usurper son identité. Les échanges sont bloqués ; après vérification avec lui, **Accepter la nouvelle clé…** |
-| Changer de nom, de port, le comportement à la fermeture | **Socket Chat › Préférences…** |
+| Changer de nom, de photo de profil, de port, le comportement à la fermeture | **Socket Chat › Préférences…** (la photo est recadrée au centre et envoyée à vos collègues) |
 | Quitter vraiment | **Socket Chat › Quitter** (`Ctrl+Q`) ou clic droit sur l'icône de notification |
 
 - Au premier lancement, l'application demande le nom affiché chez vos collègues.
@@ -412,6 +412,7 @@ Une trame est un objet JSON UTF-8 sur une ligne, terminé par `\n` :
 {"type": "file_chunk", "id": "<uuid>", "offset": 0, "data": "<base64, 32 Kio>"}
 {"type": "file_end", "id": "<uuid>", "sha256": "<empreinte>"}
 {"type": "file_cancel", "id": "<uuid>", "reason": ""}
+{"type": "avatar", "data": "<base64, JPEG ≤ 32 Kio, \"\" la retire>"}
 {"type": "bye", "reason": ""}
 ```
 
