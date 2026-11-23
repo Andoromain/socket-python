@@ -2,11 +2,9 @@
 
 import 'dart:convert';
 import 'dart:io';
-
-import 'package:flutter_test/flutter_test.dart';
-
 import 'dart:typed_data';
 
+import 'package:flutter_test/flutter_test.dart';
 import 'package:socket_chat_mobile/net/connection.dart';
 import 'package:socket_chat_mobile/net/identity.dart';
 import 'package:socket_chat_mobile/net/messenger.dart';
@@ -331,6 +329,35 @@ void main() {
       await client.close();
       expect(await closed, 'à demain');
     });
+  });
+
+  test('photos de profil échangées, changées et retirées', () async {
+    final jpeg = Uint8List.fromList([0xff, 0xd8, 0xff, 0xe0, ...List.filled(500, 7)]);
+    final alice = await messengers.make('Alice');
+    final bob = await messengers.make('Bob');
+    alice.setAvatar(jpeg); // avant la connexion : envoyée dès qu'elle est prête
+    var changed = next(bob.avatarChanged);
+    alice.addContact('127.0.0.1', bob.port!);
+    expect(await changed, alice.userId);
+    expect(bob.store.contact(alice.userId)!.avatar, jpeg);
+    expect(alice.store.contact(bob.userId)!.avatar, isEmpty);
+
+    final png = Uint8List.fromList([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0]);
+    changed = next(alice.avatarChanged);
+    bob.setAvatar(png);
+    await changed;
+    expect(alice.store.contact(bob.userId)!.avatar, png);
+
+    changed = next(bob.avatarChanged);
+    alice.setAvatar(Uint8List(0));
+    await changed;
+    expect(bob.store.contact(alice.userId)!.avatar, isEmpty);
+  });
+
+  test('photo de profil invalide refusée', () async {
+    final alice = await messengers.make('Alice', start: false);
+    expect(() => alice.setAvatar(Uint8List.fromList('GIF89a'.codeUnits)), throwsArgumentError);
+    expect(alice.avatar, isEmpty);
   });
 
   group('clés de sécurité', () {

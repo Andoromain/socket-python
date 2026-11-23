@@ -311,3 +311,25 @@ def test_refused_key_banner(qtbot, windows):
     assert "ne reconnaît pas encore" in conv.refused_banner.label.text()
     alice.messenger.key_refused.emit(contact, False)
     assert conv.refused_banner.isHidden()
+
+
+@pytest.mark.parametrize("known", [False, True])
+def test_safety_dialog_size_is_known_before_showing(qtbot, known):
+    """Régression : sous GNOME, le texte replié était coupé (taille calculée trop tôt)."""
+    from PySide6.QtWidgets import QLabel
+
+    from socket_chat.noise import KeyPair
+    from socket_chat.ui.security import SafetyNumberDialog
+
+    contact = KeyPair.generate().public if known else None
+    dialog = SafetyNumberDialog("Un nom de collègue assez long", KeyPair.generate().public, contact)
+    qtbot.addWidget(dialog)
+    before = dialog.sizeHint()
+    needed = sum(
+        label.heightForWidth(label.width()) if label.wordWrap() else label.sizeHint().height()
+        for label in dialog.findChildren(QLabel)
+    )
+    assert before.height() > needed
+    dialog.show()
+    qtbot.waitExposed(dialog)
+    assert dialog.size() == before

@@ -294,17 +294,9 @@ class _ConversationScreenState extends State<ConversationScreen> {
             backgroundColor: colors.background,
             appBar: AppBar(
               titleSpacing: 0,
-              actions: [
-                IconButton(
-                  key: const Key('safety-number'),
-                  icon: const Icon(Icons.lock_outline),
-                  tooltip: 'Chiffrement : vérifier le code de sécurité',
-                  onPressed: () => _showSafetyNumber(contact),
-                ),
-              ],
               title: Row(
                 children: [
-                  Avatar(name: contact.name, contactId: contact.id, online: online, size: 38),
+                  Avatar(name: contact.name, contactId: contact.id, online: online, size: 38, photo: contact.avatar),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
@@ -324,6 +316,28 @@ class _ConversationScreenState extends State<ConversationScreen> {
                   ),
                 ],
               ),
+              actions: [
+                IconButton(
+                  key: const Key('safety-number'),
+                  icon: const Icon(Icons.lock_outline),
+                  tooltip: 'Chiffrement : vérifier le code de sécurité',
+                  onPressed: () => _showSafetyNumber(contact),
+                ),
+                IconButton(
+                  key: const ValueKey('video-button'),
+                  tooltip: online ? 'Appel vidéo' : 'Appel vidéo : contact hors ligne',
+                  icon: const Icon(Icons.videocam_outlined),
+                  onPressed: online && controller.calls.call == null
+                      ? () => controller.startCall(contactId, 'video')
+                      : null,
+                ),
+                IconButton(
+                  key: const ValueKey('call-button'),
+                  tooltip: online ? 'Appel audio' : 'Appel audio : contact hors ligne',
+                  icon: const Icon(Icons.call),
+                  onPressed: online && controller.calls.call == null ? () => controller.startCall(contactId) : null,
+                ),
+              ],
             ),
             body: Column(
               children: [
@@ -521,7 +535,7 @@ class _MessageList extends StatelessWidget {
           firstInGroup: previous == null || !_grouped(previous, record),
           lastInGroup: next == null || !_grouped(record, next),
           progress: progressOf(record.id),
-          onLongPress: () => onLongPress(record),
+          onLongPress: record.call == null ? () => onLongPress(record) : null,
           onReactionTap: () => onReactionTap(record),
         ),
       );
@@ -582,7 +596,7 @@ class MessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final outgoing = record.outgoing;
-    final emojis = record.file == null ? emojiCount(record.text) : 0;
+    final emojis = record.file == null && record.call == null ? emojiCount(record.text) : 0;
     final jumbo = emojis > 0 && emojis <= 3;
     final background = outgoing ? colors.outgoing : colors.incoming;
     final foreground = outgoing ? colors.outgoingText : colors.incomingText;
@@ -618,7 +632,7 @@ class MessageBubble extends StatelessWidget {
           crossAxisAlignment: WrapCrossAlignment.end,
           spacing: 8,
           children: [
-            Text(record.text, style: TextStyle(color: foreground, fontSize: 16, height: 1.3)),
+            Text(record.displayText, style: TextStyle(color: foreground, fontSize: 16, height: 1.3)),
             metaRow,
           ],
         ),
@@ -662,7 +676,7 @@ class _Meta extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(clock(record.ts), style: TextStyle(fontSize: 11, color: color)),
-          if (record.outgoing) ...[
+          if (record.outgoing && record.call == null) ...[
             const SizedBox(width: 3),
             StatusTicks(status: record.status, color: color, readColor: readTickColor, size: 15),
           ],

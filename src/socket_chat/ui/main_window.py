@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from PySide6.QtCore import QEvent, QSortFilterProxyModel, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
@@ -19,11 +21,13 @@ from PySide6.QtWidgets import (
 )
 
 from .. import __version__
+from ..calls import CallManager
 from ..discovery import Discovery
 from ..messenger import Messenger
 from ..network import local_ipv4_addresses
 from ..settings import Settings
 from ..store import MessageRecord
+from .call_window import CallWindow
 from .conversation import ConversationView
 from .delegates import ContactDelegate
 from .dialogs import AddContactDialog, SettingsDialog
@@ -48,11 +52,19 @@ class MainWindow(QMainWindow):
         messenger: Messenger,
         discovery: Discovery | None = None,
         parent: QWidget | None = None,
+        *,
+        calls: CallManager | None = None,
+        ring: Callable[[bool], None] | None = None,
+        video_view: Callable[[QWidget], QWidget] | None = None,
     ):
         super().__init__(parent)
         self.settings = settings
         self.messenger = messenger
         self.discovery = discovery
+        #: Appels audio (``None`` : moteur WebEngine indisponible).
+        self.calls = calls
+        self._ring = ring
+        self._video_view = video_view
         #: Fermer la fenêtre la masque (vrai seulement si une zone de notification existe).
         self.close_to_tray = False
         self.tray_available = False
@@ -135,6 +147,19 @@ class MainWindow(QMainWindow):
         self.conversation.message_error.connect(
             lambda text: QMessageBox.warning(self, APP_TITLE, text)
         )
+        self.call_window: CallWindow | None = None
+        if self.calls is not None:
+            self.call_window = CallWindow(
+                self.calls, self.messenger, self._ring, self, video_view=self._video_view
+            )
+            self.conversation.call_button.setVisible(True)
+            self.conversation.video_button.setVisible(True)
+            self.conversation.call_requested.connect(self.start_call)
+            self.conversation.video_call_requested.connect(
+                lambda contact_id: self.start_call(contact_id, "video")
+            )
+            self.calls.incoming_call.connect(self._on_incoming_call)
+            self.calls.error.connect(lambda text: QMessageBox.warning(self, APP_TITLE, text))
 
         self.splitter = QSplitter(self)
         self.splitter.addWidget(left)
@@ -208,6 +233,8 @@ class MainWindow(QMainWindow):
             close_to_tray=self.settings.close_to_tray,
             tray_available=self.tray_available,
             first_run=first_run,
+            avatar=self.settings.avatar,
+            user_id=self.settings.user_id,
         )
         if dialog.exec() != SettingsDialog.DialogCode.Accepted:
             return False
@@ -217,6 +244,8 @@ class MainWindow(QMainWindow):
         self.settings.close_to_tray = dialog.close_to_tray
         self.close_to_tray = self.tray_available and dialog.close_to_tray
         self.messenger.name = dialog.name
+        self.settings.avatar = dialog.avatar
+        self.messenger.set_avatar(dialog.avatar)
         if self.discovery is not None:
             self.discovery.set_name(dialog.name)
         if port_changed and not first_run:
@@ -247,6 +276,20 @@ class MainWindow(QMainWindow):
         self.raise_()
         self.activateWindow()
 
+    def start_call(self, contact_id: str, media: str = "audio") -> None:
+        if self.calls is None:
+            return
+        try:
+            self.calls.start_call(contact_id, media)
+        except ValueError as exc:
+            QMessageBox.warning(self, APP_TITLE, str(exc))
+
+    def _on_incoming_call(self, contact_id: str, media: str) -> None:
+        contact = self.messenger.store.contact(contact_id)
+        name = contact.name if contact else "Un collègue"
+        kind = "🎥 Appel vidéo entrant" if media == "video" else "📞 Appel audio entrant"
+        self.notify.emit(contact_id, name, kind)
+
     def request_quit(self) -> None:
         self._quitting = True
         self.quit_requested.emit()
@@ -274,8 +317,8 @@ class MainWindow(QMainWindow):
     def _on_message_added(self, record: MessageRecord) -> None:
         if record.contact_id == self.conversation.contact_id:
             self.conversation.add_message(record)
-        if record.outgoing:
-            return
+        if record.outgoing or (record.call is not None and not record.unread):
+            return  # seuls les appels manqués sont signalés
         if record.contact_id == self.conversation.contact_id and self._is_attended():
             self.messenger.mark_read(record.contact_id)
             return

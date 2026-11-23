@@ -198,4 +198,39 @@ void main() {
     db.close();
     expect(() => Store(path), throwsStateError);
   });
+
+  test('photo de profil d\'un contact', () {
+    final jpeg = Uint8List.fromList([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
+    final store = Store();
+    store.upsertContact(a, 'Alice');
+    expect(store.contact(a)!.avatar, isEmpty);
+    expect(store.setAvatar(a, jpeg), isTrue);
+    expect(store.setAvatar(a, jpeg), isFalse);
+    expect(store.contact(a)!.avatar, jpeg);
+    store.upsertContact(a, 'Alice Martin', host: '10.0.0.1'); // la photo est conservée
+    expect(store.contacts().first.contact.avatar, jpeg);
+    expect(store.setAvatar(a, Uint8List(0)), isTrue);
+    expect(store.contact(a)!.avatar, isEmpty);
+    expect(store.setAvatar(b, jpeg), isFalse); // contact inconnu
+  });
+
+  test('migration depuis le schéma 2', () {
+    final path = '${tmp.path}/v2.sqlite3';
+    final old = Store(path);
+    old.upsertContact(a, 'Alice', host: '10.0.0.1', port: 12800);
+    old.addMessage(msg(1));
+    old.close();
+    final db = sqlite3.open(path);
+    db.execute('ALTER TABLE contacts DROP COLUMN avatar; PRAGMA user_version = 2;');
+    db.close();
+
+    final store = Store(path);
+    expect(store.contact(a)!.host, '10.0.0.1');
+    expect(store.messages(a).map((m) => m.text), ['m1']);
+    expect(store.setAvatar(a, Uint8List.fromList([0xff, 0xd8, 0xff])), isTrue);
+    store.close();
+    final check = sqlite3.open(path);
+    expect(check.select('PRAGMA user_version').first.columnAt(0), 4);
+    check.close();
+  });
 }

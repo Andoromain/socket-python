@@ -9,10 +9,14 @@ central :
 - messages en **bulles**, indications **« écrit… »**, accusés **✓ envoyé, ✓✓ remis,
   ✓✓ bleu lu** ;
 - un message écrit à un collègue absent lui est **remis à son retour** ;
+- **photo de profil** : chacun choisit la sienne, ses collègues la voient à la place
+  des initiales ;
 - **emojis** (sélecteur avec recherche, `:)` → 🙂) et **réactions** sur les messages
   (👍 ❤️ 😂…) ;
 - **envoi de fichiers et d'images** (bouton 📎, glisser-déposer, Ctrl+V d'une capture) :
   le destinataire voit un aperçu et accepte ou refuse ;
+- **appels audio et vidéo** entre PC et téléphones (boutons 📞 et 🎥) : son et image
+  directs d'un appareil à l'autre, avec annulation d'écho et réduction de bruit ;
 - **notifications** et compteur de non-lus dans la zone de notification, où
   l'application reste active quand on ferme la fenêtre ;
 - **échanges chiffrés de bout en bout** (protocole Noise) : personne d'autre sur le
@@ -27,6 +31,10 @@ clair ou sombre selon le système.
 | ![Capture en thème clair](docs/capture-clair.png) | ![Capture en thème sombre](docs/capture-sombre.png) |
 
 <p align="center"><img src="docs/emojis.png" alt="Sélecteur d'emojis" width="370"></p>
+
+<p align="center"><img src="docs/photos-profil.png" alt="Photos de profil dans la liste des contacts" width="600"></p>
+
+<p align="center"><img src="docs/appel-pc.png" alt="Appel audio sur PC : appel entrant, puis appel en cours" width="600"></p>
 
 **Nouveau : application Android** (en test, voir [Android](#android-en-test)). Un téléphone
 sur le Wi-Fi de l'entreprise converse avec les postes Windows et Linux.
@@ -47,9 +55,11 @@ sur le Wi-Fi de l'entreprise converse avec les postes Windows et Linux.
    et sans droits administrateur**. Elle crée un raccourci dans le menu Démarrer et un
    programme de désinstallation.
 3. Au premier lancement, Windows peut demander d'autoriser l'application dans le
-   pare-feu : accepter pour les réseaux **privés / de domaine**. Si l'installeur est
-   lancé en mode administrateur, une option crée cette règle directement (elle couvre
-   la messagerie et la détection des collègues).
+   pare-feu : accepter pour les réseaux **privés / de domaine**. Au premier appel, la
+   même demande peut apparaître pour **QtWebEngineProcess** (le moteur des appels) :
+   l'accepter aussi, sinon le son ne passe pas. Si l'installeur est lancé en mode
+   administrateur, une option crée ces règles directement (messagerie, détection des
+   collègues et appels).
 
 > Déploiement silencieux (GPO, SCCM, Intune…) :
 > `socket-chat-<version>-windows-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /ALLUSERS /TASKS="firewall"`
@@ -71,6 +81,11 @@ menu des applications et la commande `socket-chat`. Pour la désinstaller :
 L'archive est construite sur Ubuntu 22.04 et fonctionne sur les distributions
 équivalentes ou plus récentes (Debian 12, RHEL 9, Fedora…).
 
+Les appels utilisent le moteur de Chrome (Qt WebEngine), qui a besoin de bibliothèques
+présentes sur tout bureau Linux courant (`libnss3`, `libasound2`, `libxkbfile1`,
+`libxcomposite1`, `libxdamage1`, `libxrandr2`, `libxtst6`, `libgbm1`). Sur un poste
+minimal, si le bouton 📞 n'aboutit pas, les installer avec le gestionnaire de paquets.
+
 ### Avec Python (toutes plates-formes)
 
 Si Python est déjà disponible sur le poste :
@@ -87,29 +102,70 @@ ou, sans pipx, `pip install --user <url ou chemin du dépôt>`. Cela fournit la 
 L'application Android parle le même protocole que les postes : pas de serveur, le
 téléphone doit simplement être sur **le même réseau** (le Wi-Fi de l'entreprise).
 
-1. Sur le téléphone, ouvrir la page **Releases** de ce dépôt et télécharger `socket-chat-X.Y.Z-android.apk` de la dernière version.
+1. Sur le téléphone, ouvrir la page **Releases** de ce dépôt et télécharger, pour la
+   dernière version :
+   - `socket-chat-X.Y.Z-android-arm64-v8a.apk` : presque tous les téléphones récents
+     (environ trois fois plus léger) ;
+   - ou `socket-chat-X.Y.Z-android.apk` : tous les téléphones, en cas de doute ou si le
+     premier refuse de s'installer (« application incompatible »).
+
+   Ensuite, la mise à jour intégrée choisit d'elle-même le fichier le plus léger qui
+   convient au téléphone.
 2. L'ouvrir. Android demande d'autoriser l'installation depuis cette source
    (navigateur ou gestionnaire de fichiers) : c'est normal pour une application hors
    Play Store.
 3. Au premier lancement, saisir son nom : les collègues du réseau apparaissent.
 
-Pour mettre à jour, installer l'APK de la nouvelle version par-dessus : l'historique
-est conservé. **Si vous aviez installé un APK d'essai** (artefact
+**Mises à jour** : à partir de la 3.5, l'application vérifie elle-même s'il existe une
+nouvelle version (au démarrage, au retour dans l'application, ou depuis Préférences ›
+Rechercher une mise à jour) et l'annonce par un bandeau : **Mettre à jour** télécharge
+l'APK, vérifie taille et empreinte SHA-256, puis ouvre l'installation, qu'Android fait
+toujours confirmer. La première fois, Android demande aussi d'autoriser Socket Chat à
+installer des applications : l'écran s'ouvre tout seul, il suffit d'activer l'option
+puis de revenir. Pour passer d'une version antérieure à la 3.5, installer une dernière
+fois l'APK à la main, par-dessus : l'historique est conservé. **Si vous aviez installé un APK d'essai** (artefact
 `socket-chat-android-test` de GitHub Actions, avant la 3.3.1), désinstallez-le une
 fois : il était signé avec une autre clé et Android refuse de le remplacer.
 
 Déjà disponible : détection des collègues, ajout par adresse, conversations, coches,
 « écrit… », emojis et réactions (appui long sur une bulle), messages hors ligne remis
-plus tard. Une offre de fichier venant d'un PC s'affiche et peut être refusée.
+plus tard, photo de profil, **appels audio et vidéo** avec les PC et les autres
+téléphones (boutons 📞 et 🎥 de la conversation ; Android demande l'accès au micro, et
+à la caméra, au premier appel). En vidéo, l'image du correspondant occupe l'écran, la
+sienne s'affiche en incrustation ; boutons micro, caméra, retourner (caméra avant ou
+arrière) et raccrocher. Le haut-parleur est activé d'office en vidéo.
+Une offre de fichier venant d'un PC s'affiche et peut être refusée.
 
-Pas encore (version suivante) : réception et envoi de fichiers et de photos,
-notifications quand l'application est fermée, mise à jour proposée par l'application.
+<p align="center"><img src="docs/appel-android.png" alt="Android : appel entrant, appel en cours, appels dans la conversation" width="720"></p>
+
+**Joignable application fermée** (à partir de la 3.7) : Socket Chat reste actif en
+arrière-plan, même après un redémarrage du téléphone. Une notification discrète et
+permanente l'indique (Android l'exige). Les nouveaux messages et les appels manqués
+arrivent en notification, un par conversation ; un toucher ouvre la conversation. Un
+appel entrant fait sonner et vibrer le téléphone selon son mode (normal, vibreur,
+silencieux) et s'affiche en plein écran, même verrouillé, avec **Répondre** et
+**Refuser**. Réglage : Préférences › **Rester joignable** (activé par défaut).
+
+Au premier lancement de la 3.7, Android demande d'autoriser les **notifications** :
+accepter. Les Préférences signalent ensuite ce qui manque encore, avec un bouton vers le
+bon réglage d'Android :
+
+- **Appels sur l'écran verrouillé** (Android 14 et plus) : autoriser Socket Chat à
+  afficher les appels en plein écran ;
+- **Optimisation de la batterie** : certains fabricants (Xiaomi, Huawei, Samsung,
+  Oppo…) arrêtent les applications en arrière-plan ; exclure Socket Chat de
+  l'optimisation. La consommation reste très faible : l'application attend simplement
+  sur le réseau.
+
+Pas encore : réception et envoi de fichiers et de photos.
 
 Limites à connaître :
 
-- Pour l'instant, l'application ne reçoit les messages que lorsqu'elle est ouverte (au
-  premier plan ou récemment utilisée). Les messages envoyés pendant ce temps attendent
-  sur le poste de l'expéditeur et arrivent à la réouverture.
+- « Rester joignable » désactivé, l'application ne reçoit messages et appels que
+  lorsqu'elle est ouverte : les messages attendent sur le poste de l'expéditeur, un
+  appel aboutit à « Pas de réponse ».
+- Hors du réseau de l'entreprise, Socket Chat reste actif mais ne joint personne ; il
+  retrouve les collègues au retour sur le Wi-Fi.
 - Certains réseaux Wi-Fi d'entreprise **isolent les appareils entre eux** (« isolation
   des clients ») : ni la détection ni les connexions ne passent alors. Ce réglage relève
   du service informatique.
@@ -190,7 +246,10 @@ et `latest.json.sig`) **tels quels** : un manifeste modifié ou sans signature e
 | Copier un message | Clic droit sur la bulle |
 | Vérifier le chiffrement avec un collègue | Bouton 🔒 en haut de la conversation : comparer de vive voix (ou par téléphone) le code de sécurité affiché des deux côtés. Identiques : personne ne s'intercale entre vous |
 | « La clé de sécurité a changé » | Bandeau orange : le collègue a réinstallé Socket Chat ou changé de poste… ou quelqu'un tente d'usurper son identité. Les échanges sont bloqués ; après vérification avec lui, **Accepter la nouvelle clé…** |
+| Appeler un collègue | Bouton 📞 (audio) ou 🎥 (vidéo) en haut de la conversation (collègue en ligne). Pendant l'appel : **Couper le micro**, **Couper la caméra** (vidéo), **Raccrocher** |
+| Répondre à un appel | Une fenêtre s'ouvre et sonne : **Répondre** ou **Refuser** |
 | Changer de nom, de port, le comportement à la fermeture | **Socket Chat › Préférences…** |
+| Mettre ou retirer sa photo de profil | **Socket Chat › Préférences…** › Choisir une photo… (sur Android : Préférences, toucher la pastille) |
 | Quitter vraiment | **Socket Chat › Quitter** (`Ctrl+Q`) ou clic droit sur l'icône de notification |
 
 - Au premier lancement, l'application demande le nom affiché chez vos collègues.
@@ -207,6 +266,10 @@ et `latest.json.sig`) **tels quels** : un manifeste modifié ou sans signature e
   relance le transfert.
 - Les images collées sont conservées dans le dossier de données de l'application
   (`envois`) pour pouvoir être renvoyées.
+- Les appels sont notés dans la conversation (« Appel audio · 3 min 12 », « Appel
+  manqué »…) ; un appel manqué déclenche une notification. Le son passe directement
+  d'un appareil à l'autre, chiffré (WebRTC), sans serveur. Un collègue en version
+  antérieure à la 3.6 ne peut pas être appelé : un message invite à le mettre à jour.
 
 ### Réseau
 
@@ -215,8 +278,12 @@ et `latest.json.sig`) **tels quels** : un manifeste modifié ou sans signature e
 | **12800/TCP** | messages (modifiable dans les préférences) |
 | **12801/UDP** | détection des collègues (annonces diffusées sur le réseau local) |
 
+| UDP, ports variables | son et image des appels (WebRTC), directement entre les deux appareils |
+
 La détection utilise la diffusion (broadcast) : elle ne franchit pas les routeurs et peut
 être filtrée sur certains réseaux. Dans ce cas, l'ajout par adresse fonctionne toujours.
+Les appels n'utilisent aucun serveur extérieur (ni STUN ni TURN) : ils fonctionnent
+entre appareils qui se joignent directement (même réseau, ou VPN sans filtrage UDP).
 
 Options en ligne de commande : `socket-chat --version`, `socket-chat --debug`
 (journal détaillé).
@@ -253,11 +320,11 @@ réseau de l'entreprise.
 
 - **Chiffrement de bout en bout** (depuis la 4.0) : chaque connexion commence par une
   poignée de main [Noise](https://noiseprotocol.org/) `Noise_XX_25519_ChaChaPoly_SHA256`
-  (X25519, ChaCha20-Poly1305, SHA-256). Messages, accusés, réactions et fichiers sont
-  chiffrés et authentifiés : une écoute du réseau (Wi-Fi compris) ne révèle rien de leur
-  contenu, et une donnée modifiée en route coupe la connexion. Les clés de session sont
-  éphémères : une clé de poste volée plus tard ne permet pas de déchiffrer les échanges
-  passés enregistrés.
+  (X25519, ChaCha20-Poly1305, SHA-256). Messages, accusés, réactions, fichiers, photos
+  de profil et signalisation des appels sont chiffrés et authentifiés : une écoute du
+  réseau (Wi-Fi compris) ne révèle rien de leur contenu, et une donnée modifiée en route
+  coupe la connexion. Les clés de session sont éphémères : une clé de poste volée plus
+  tard ne permet pas de déchiffrer les échanges passés enregistrés.
 - **Authentification des correspondants** : chaque poste a sa propre clé
   (`identity.key`) et le prouve à chaque connexion. La clé d'un collègue est mémorisée au
   premier échange ; ensuite, toute autre clé est **refusée** et signalée (bandeau « clé
@@ -266,20 +333,30 @@ réseau de l'entreprise.
 - Ce qui reste visible sur le réseau : les annonces de présence (nom affiché, port) et
   le fait que deux postes communiquent, pas le contenu. Le nom d'un contact déjà vérifié
   ne peut pas être modifié par une annonce.
+- Appels : le son et l'image sont chiffrés par WebRTC (DTLS-SRTP) ; leur signalisation
+  passe par la connexion chiffrée et authentifiée de Socket Chat, si bien qu'un appareil
+  du réseau ne peut pas s'interposer. Aucun serveur extérieur n'est contacté. Sur PC,
+  seul le moteur des appels de Socket Chat (page locale, aucun site web) peut ouvrir le
+  micro et la caméra, et seulement pendant un appel ; sur Android, l'accès est demandé
+  au premier appel.
+- Photo de profil : envoyée à chaque collègue avec qui l'on converse (pas de diffusion
+  sur le réseau) ; réduite à 256 px et 32 Kio. Seules des images JPEG ou PNG sont
+  acceptées des autres postes ; une image illisible est remplacée par les initiales.
 - **Historique chiffré sur le disque** : le texte des messages, le nom et le chemin des
-  fichiers et les aperçus d'images sont chiffrés (ChaCha20-Poly1305) avec la clé de
-  l'historique, protégée par DPAPI sous Windows et par Android Keystore sur téléphone.
-  Chaque valeur est liée à son message : elle ne peut être ni modifiée ni déplacée sans
-  être détectée. Un historique existant est chiffré au premier lancement de la 4.0 puis
-  compacté, pour qu'aucune ancienne donnée en clair ne reste dans le fichier. Restent
-  lisibles les contacts, les dates et les états des messages. Sous Linux, la clé est
-  protégée par les droits du fichier : chiffrez le disque (LUKS) pour vous protéger du
-  vol. Les fichiers reçus sont enregistrés tels quels, là où l'utilisateur l'a choisi.
-- Mise à jour automatique : uniquement en HTTPS (ou depuis un dossier), manifeste
-  **signé** (Ed25519, clé publique intégrée à l'application), version strictement plus
-  récente, taille et empreinte SHA-256 vérifiées avant toute exécution. Gardez la clé
-  privée (`UPDATE_SIGNING_KEY`) hors du dépôt et protégez le compte GitHub (double
-  authentification).
+  fichiers, les aperçus d'images et les appels notés sont chiffrés (ChaCha20-Poly1305)
+  avec la clé de l'historique, protégée par DPAPI sous Windows et par Android Keystore
+  sur téléphone. Chaque valeur est liée à son message : elle ne peut être ni modifiée ni
+  déplacée sans être détectée. Un historique existant est chiffré au premier lancement
+  de la 4.x puis compacté, pour qu'aucune ancienne donnée en clair ne reste dans le
+  fichier. Restent lisibles les contacts (et leur photo), les dates et les états des
+  messages. Sous Linux, la clé est protégée par les droits du fichier : chiffrez le
+  disque (LUKS) pour vous protéger du vol. Les fichiers reçus sont enregistrés tels
+  quels, là où l'utilisateur l'a choisi.
+- Mise à jour automatique (PC et Android) : uniquement en HTTPS (ou depuis un dossier),
+  manifeste **signé** (Ed25519, clé publique intégrée à l'application), version
+  strictement plus récente, taille et empreinte SHA-256 vérifiées avant toute
+  exécution. Gardez la clé privée (`UPDATE_SIGNING_KEY`) hors du dépôt et protégez le
+  compte GitHub (double authentification).
 - Réseaux autorisés : l'administrateur peut limiter Socket Chat aux réseaux de
   l'entreprise. Sur un réseau extérieur, l'appareil n'accepte alors plus aucune
   connexion ni annonce.
@@ -336,9 +413,11 @@ src/socket_chat/
 ├── signing.py        signature Ed25519 du manifeste de mise à jour : pur Python
 ├── netpolicy.py      réseaux autorisés (réglage d'administration) : pur Python
 ├── discovery.py      Discovery : annonces UDP et détection des collègues
+├── calls.py          appels : signalisation, déroulement, délais, historique (sans média)
+├── call_engine.py    média des appels : WebRTC dans une page Qt WebEngine invisible
 ├── settings.py       préférences utilisateur (QSettings)
 ├── ui/               fenêtre, modèles, délégués (bulles), emojis, zone de notification
-└── resources/        icônes (SVG ; PNG/ICO générés par scripts/make_icons.py)
+└── resources/        icônes (SVG ; PNG/ICO générés par scripts/make_icons.py), call.html
 ```
 
 Tout repose sur la boucle d'événements Qt : aucun thread, les signaux de `Messenger`
@@ -354,10 +433,15 @@ côtés.
 mobile/lib/
 ├── protocol/     trames et annonces (protocol.py)
 ├── store/        historique SQLite (store.py), même schéma
-├── net/          chiffrement, connexion, messagerie, fichiers, détection (noise.py, network.py…)
-├── app/          préférences, contrôleur, canal Android (verrou multicast Wi-Fi)
+├── net/          chiffrement, connexion, messagerie, fichiers, détection, appels
+│                 (noise.py, network.py, calls.py…)
+├── calls/        média des appels (flutter_webrtc)
+├── app/          préférences, contrôleur, coffre (Keystore), canaux Android (multicast
+│                 Wi-Fi, sonnerie, service et notifications)
 └── ui/           écrans Material 3
 mobile/tool/peer.dart   pair en ligne de commande pour le test d'interopérabilité
+mobile/android/app/src/main/kotlin/   côté Android : application (moteur Flutter
+                         démarré avec le processus), service au premier plan, notifications
 ```
 
 Avec [Flutter](https://docs.flutter.dev/get-started/install) (version de la CI) :
@@ -384,8 +468,12 @@ Compatibilité vérifiée automatiquement :
   (`tests/fixtures/noise_xx_vector.json`, copié dans `mobile/test/fixtures/`).
 - `tests/test_interop.py` fait converser la version PC avec `mobile/tool/peer.dart`
   (connexion chiffrée et code de sécurité, messages, accusés, réactions, fichiers dans
-  les deux sens, détection). Ignoré si Dart
+  les deux sens, photos de profil, détection, signalisation des appels). Ignoré si Dart
   est absent ; obligatoire dans le job « Android » de la CI.
+- `tests/test_call_engine.py` passe un vrai appel WebRTC entre deux postes (faux micros
+  de Chrome) et vérifie que le son arrive des deux côtés ; obligatoire sous Linux en CI.
+  Le job « Empaquetage » construit les installeurs à chaque PR et vérifie que le moteur
+  des appels démarre dans l'exécutable (`socket-chat --check-calls`).
 - La version de `mobile/pubspec.yaml` (et son `versionCode`, `X*10000 + Y*100 + Z`) doit
   être celle de `src/socket_chat/__init__.py`.
 
@@ -412,8 +500,20 @@ Une trame est un objet JSON UTF-8 sur une ligne, terminé par `\n` :
 {"type": "file_chunk", "id": "<uuid>", "offset": 0, "data": "<base64, 32 Kio>"}
 {"type": "file_end", "id": "<uuid>", "sha256": "<empreinte>"}
 {"type": "file_cancel", "id": "<uuid>", "reason": ""}
+{"type": "call_invite", "id": "<uuid de l'appel>", "media": "audio"}
+{"type": "call_ringing", "id": "<uuid>"}
+{"type": "call_accept", "id": "<uuid>"}
+{"type": "call_sdp", "id": "<uuid>", "kind": "offer", "sdp": "v=0…"}
+{"type": "call_ice", "id": "<uuid>", "candidate": "candidate:…", "mid": "0", "index": 0}
+{"type": "call_end", "id": "<uuid>", "reason": "hangup"}
 {"type": "bye", "reason": ""}
 ```
+
+Appels : l'appelé accuse l'invitation par `call_ringing` (sans accusé sous 6 s, l'appelant
+conclut à une version trop ancienne) et sonne 30 s. S'il accepte, l'appelant envoie son
+offre WebRTC (`call_sdp`), l'appelé sa réponse, et les candidats réseau (`call_ice`)
+s'échangent au fil de l'eau ; le son passe ensuite directement entre les appareils.
+`call_end` termine l'appel (`hangup`, `declined`, `busy`, `timeout`, `failed`).
 
 Les blocs de fichier sont envoyés au rythme où la connexion se vide (jamais plus de
 512 Kio en attente), si bien que la conversation reste fluide pendant un transfert et

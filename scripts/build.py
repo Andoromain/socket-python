@@ -36,7 +36,29 @@ def pyinstaller() -> Path:
         "--distpath", str(DIST), "--workpath", str(ROOT / "build"),
         str(ROOT / "packaging" / "socket-chat.spec"),
     )  # fmt: skip
-    return DIST / "socket-chat"
+    app_dir = DIST / "socket-chat"
+    check_calls(app_dir)
+    return app_dir
+
+
+def check_calls(app_dir: Path) -> None:
+    """L'exécutable construit doit démarrer le moteur des appels (Qt WebEngine)."""
+    if sys.platform == "win32":
+        # Chemin repris par la règle de pare-feu de l'installeur (installer.iss).
+        process = app_dir / "_internal" / "PySide6" / "QtWebEngineProcess.exe"
+        if not process.exists():
+            raise SystemExit(f"Moteur des appels absent : {process}")
+        exe = app_dir / "socket-chat.exe"
+    else:
+        exe = app_dir / "socket-chat"
+    env = dict(os.environ)
+    if sys.platform.startswith("linux"):
+        env.setdefault("QT_QPA_PLATFORM", "offscreen")
+    print("+", exe, "--check-calls", flush=True)
+    code = subprocess.run([str(exe), "--check-calls"], env=env, timeout=180).returncode
+    if code != 0:
+        raise SystemExit(f"Le moteur des appels ne démarre pas dans l'exécutable (code {code})")
+    print("Moteur des appels : OK")
 
 
 def find_iscc() -> str | None:

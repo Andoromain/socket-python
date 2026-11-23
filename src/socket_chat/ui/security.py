@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLayout,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -25,6 +26,24 @@ def format_number(number: str) -> str:
     return "\n".join(" ".join(groups[i : i + 4]) for i in range(0, len(groups), 4))
 
 
+#: Largeur du texte des fenêtres de sécurité (pixels indépendants de l'écran).
+TEXT_WIDTH = 440
+
+
+def _paragraph(text: str, parent: QWidget, *, rich: bool = False) -> QLabel:
+    """Texte sur plusieurs lignes, de largeur fixe.
+
+    Avec une largeur fixe, Qt connaît la hauteur du texte replié avant l'affichage : la
+    fenêtre est dimensionnée correctement quel que soit le gestionnaire de fenêtres
+    (sinon le texte peut être coupé, comme sous GNOME).
+    """
+    label = QLabel(text, parent)
+    label.setTextFormat(Qt.TextFormat.RichText if rich else Qt.TextFormat.PlainText)
+    label.setWordWrap(True)
+    label.setFixedWidth(TEXT_WIDTH)
+    return label
+
+
 class SafetyNumberDialog(QDialog):
     """Code de sécurité à comparer avec celui affiché chez le contact."""
 
@@ -34,19 +53,24 @@ class SafetyNumberDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(f"Chiffrement — {name}")
         layout = QVBoxLayout(self)
-        layout.setSpacing(12)
-        title = QLabel(f"🔒 Vos échanges avec <b>{_escape(name)}</b> sont chiffrés.", self)
-        title.setTextFormat(Qt.TextFormat.RichText)
+        layout.setSpacing(14)
+        layout.setContentsMargins(20, 18, 20, 14)
+        # La fenêtre prend exactement la taille de son contenu (ni coupée, ni étirée).
+        layout.setSizeConstraint(QLayout.SizeConstraint.SetFixedSize)
+        title = _paragraph(
+            f"🔒 Vos échanges avec <b>{_escape(name)}</b> sont chiffrés.", self, rich=True
+        )
         layout.addWidget(title)
         if contact_key is None:
             self.number = None
-            text = (
-                f"{_escape(name)} ne s'est pas encore connecté avec une version chiffrée de "
-                "Socket Chat : le code de sécurité apparaîtra après votre premier échange."
+            layout.addWidget(
+                _paragraph(
+                    f"{name} ne s'est pas encore connecté avec une version chiffrée de "
+                    "Socket Chat : le code de sécurité apparaîtra après votre premier "
+                    "échange.",
+                    self,
+                )
             )
-            info = QLabel(text, self)
-            info.setWordWrap(True)
-            layout.addWidget(info)
         else:
             self.number = safety_number(own_key, contact_key)
             code = QLabel(format_number(self.number), self)
@@ -56,21 +80,21 @@ class SafetyNumberDialog(QDialog):
             code.setFont(font)
             code.setAlignment(Qt.AlignmentFlag.AlignCenter)
             code.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            code.setFixedWidth(TEXT_WIDTH)
             layout.addWidget(code)
-            help_text = QLabel(
-                f"Comparez ce code avec celui qu'affiche {_escape(name)} (Socket Chat, "
-                "🔒 dans votre conversation), en personne ou par téléphone. S'ils sont "
-                "identiques, personne ne peut lire ni modifier vos échanges.",
-                self,
+            layout.addWidget(
+                _paragraph(
+                    f"Comparez ce code avec celui qu'affiche {name} (Socket Chat, 🔒 dans "
+                    "votre conversation), en personne ou par téléphone. S'ils sont "
+                    "identiques, personne ne peut lire ni modifier vos échanges.",
+                    self,
+                )
             )
-            help_text.setWordWrap(True)
-            layout.addWidget(help_text)
         buttons = QDialogButtonBox(self)
         close = buttons.addButton("Fermer", QDialogButtonBox.ButtonRole.RejectRole)
         close.setDefault(True)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
-        self.setMinimumWidth(420)
 
 
 class KeyBanner(QFrame):

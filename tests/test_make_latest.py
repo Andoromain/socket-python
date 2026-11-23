@@ -33,6 +33,8 @@ def write_assets(dist: Path, version: str, *, windows=True, linux=True, android=
         (dist / f"socket-chat-{version}-linux-x86_64.tar.gz").write_bytes(b"tgz" * 50)
     if android:
         (dist / f"socket-chat-{version}-android.apk").write_bytes(b"apk" * 70)
+        for abi, size in (("arm64-v8a", 30), ("armeabi-v7a", 20), ("x86_64", 25)):
+            (dist / f"socket-chat-{version}-android-{abi}.apk").write_bytes(b"apk" * size)
 
 
 def test_manifest_lists_assets_and_notes(tmp_path):
@@ -57,6 +59,10 @@ def test_android_apk_is_listed_and_ignored_by_desktop(tmp_path):
     manifest = make_latest.build_manifest(tmp_path, "9.9.9", changelog)
     assert manifest["assets"]["android"]["name"] == "socket-chat-9.9.9-android.apk"
     assert manifest["assets"]["android"]["size"] == 210
+    # Un APK par type de processeur, choisi par la mise à jour intégrée du téléphone.
+    split = manifest["assets"]["android-arm64-v8a"]
+    assert split["name"] == "socket-chat-9.9.9-android-arm64-v8a.apk" and split["size"] == 90
+    assert {"android-armeabi-v7a", "android-x86_64"} <= manifest["assets"].keys()
     parsed = parse_manifest(json.dumps(manifest).encode(), "https://exemple.fr/maj/latest.json")
     # Un poste Windows ou Linux ne choisit jamais l'APK.
     for key in ("windows-x64", "linux-x86_64"):

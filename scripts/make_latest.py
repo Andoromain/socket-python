@@ -20,12 +20,19 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+#: Types de processeur Android publiés séparément (``flutter build apk --split-per-abi``).
+ANDROID_ABIS = ("arm64-v8a", "armeabi-v7a", "x86_64")
+
 #: Plate-forme -> modèle de nom du fichier publié.
 ASSETS = {
     "windows-x64": "socket-chat-{version}-windows-setup.exe",
     "linux-x86_64": "socket-chat-{version}-linux-x86_64.tar.gz",
     # Application Android (APK signé) : ignorée par la version PC, lue par l'application.
+    # APK universel (tous les téléphones, installation à la main et versions ≤ 3.8) ...
     "android": "socket-chat-{version}-android.apk",
+    # ... et un APK par type de processeur, trois fois plus léger, choisi par la mise à
+    # jour intégrée (3.8.1 et suivantes) selon le téléphone.
+    **{f"android-{abi}": f"socket-chat-{{version}}-android-{abi}.apk" for abi in ANDROID_ABIS},
 }
 
 

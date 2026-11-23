@@ -11,7 +11,14 @@ import getpass
 from PySide6.QtCore import QByteArray, QSettings
 
 from .netpolicy import Network, parse_networks
-from .protocol import DEFAULT_PORT, MAX_NAME_LENGTH, is_valid_id, new_id, validate_name
+from .protocol import (
+    DEFAULT_PORT,
+    MAX_NAME_LENGTH,
+    is_avatar_image,
+    is_valid_id,
+    new_id,
+    validate_name,
+)
 from .updater import DEFAULT_UPDATE_URL
 
 MAX_RECENT_HOSTS = 10
@@ -49,6 +56,20 @@ class Settings:
     @name.setter
     def name(self, value: str) -> None:
         self._store.setValue("user/name", validate_name(value))
+
+    @property
+    def avatar(self) -> bytes:
+        """Notre photo de profil (JPEG), ``b""`` si aucune."""
+        value = self._store.value("user/avatar")
+        data = bytes(value.data()) if isinstance(value, QByteArray) else b""
+        return data if is_avatar_image(data) else b""
+
+    @avatar.setter
+    def avatar(self, value: bytes) -> None:
+        if value:
+            self._store.setValue("user/avatar", QByteArray(value))
+        else:
+            self._store.remove("user/avatar")
 
     @property
     def port(self) -> int:

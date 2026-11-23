@@ -12,16 +12,20 @@ Les tests Python et Dart lisent le même fichier ; un test Python vérifie qu'il
 from __future__ import annotations
 
 import base64
+import importlib.util
 import json
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from socket_chat import signing  # noqa: E402
 from socket_chat.identity import PROLOGUE, safety_number  # noqa: E402
 from socket_chat.protocol import (  # noqa: E402
     CHUNK_SIZE,
+    MAX_AVATAR_SIZE,
     MAX_TEXT_LENGTH,
     PROTOCOL_VERSION,
     AckStatus,
@@ -60,7 +64,21 @@ def _fields(message: Message) -> dict[str, object]:
         "offset": message.offset,
         "data": _b64(message.data),
         "sha256": message.sha256,
+        "media": message.media,
+        "sdp_kind": message.sdp_kind,
+        "sdp": message.sdp,
+        "candidate": message.candidate,
+        "mid": message.mid,
+        "index": message.index,
     }
+
+
+SDP = (
+    "v=0\r\no=- 4611731400430051336 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n"
+    "a=group:BUNDLE 0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\nc=IN IP4 0.0.0.0\r\n"
+    "a=rtpmap:111 opus/48000/2\r\na=fmtp:111 minptime=10;useinbandfec=1\r\n"
+)
+ICE = "candidate:842163049 1 udp 1677729535 192.168.1.20 61338 typ host generation 0"
 
 
 VALID = [
@@ -86,6 +104,20 @@ VALID = [
     Message.file_chunk(UID, CHUNK_SIZE, bytes(range(256)) * 4),
     Message.file_end(UID, "a" * 64),
     Message.file_cancel(UID, "integrity"),
+    Message.avatar(b"\xff\xd8\xff\xe0" + bytes(range(256)) * 8),
+    Message.avatar(b"\x89PNG\r\n\x1a\n" + b"\x00" * 40),
+    Message.avatar(b"\xff\xd8\xff" + b"j" * (MAX_AVATAR_SIZE - 3)),
+    Message.avatar(b""),
+    Message.call_invite(UID, "audio"),
+    Message.call_invite(UID, "video"),
+    Message.call_ringing(UID),
+    Message.call_accept(UID),
+    Message.call_sdp(UID, "offer", SDP),
+    Message.call_sdp(UID, "answer", SDP),
+    Message.call_ice(UID, ICE, "0", 0),
+    Message.call_ice(UID, "", "", 0),
+    Message.call_end(UID, "hangup"),
+    Message.call_end(UID, "busy"),
     Message.bye("au revoir"),
     Message.bye(),
 ]
@@ -145,6 +177,19 @@ INVALID = [
     _json({"type": "file_end", "id": UID, "sha256": "zz"}),
     _json({"type": "file_end", "id": UID, "sha256": "A" * 64}),
     _json({"type": "file_cancel", "id": UID, "reason": 1}),
+    _json({"type": "call_invite", "id": UID, "media": "fax"}),
+    _json({"type": "call_invite", "media": "audio"}),
+    _json({"type": "call_sdp", "id": UID, "kind": "pranswer", "sdp": "v=0"}),
+    _json({"type": "call_sdp", "id": UID, "kind": "offer", "sdp": ""}),
+    _json({"type": "call_sdp", "id": UID, "kind": "offer", "sdp": "x" * (16 * 1024 + 1)}),
+    _json({"type": "call_ice", "id": UID, "candidate": "c" * 1025, "mid": "0", "index": 0}),
+    _json({"type": "call_ice", "id": UID, "candidate": "c", "mid": "0", "index": 65}),
+    _json({"type": "call_ice", "id": UID, "candidate": "c", "mid": "0", "index": "0"}),
+    _json({"type": "call_end", "id": UID, "reason": "r" * 33}),
+    _json({"type": "avatar", "data": 5}),
+    _json({"type": "avatar", "data": "pas du base64!"}),
+    _json({"type": "avatar", "data": _b64(b"GIF89a" + b"\x00" * 10)}),
+    _json({"type": "avatar", "data": _b64(b"\xff\xd8\xff" + b"j" * MAX_AVATAR_SIZE)}),
 ]
 
 UNKNOWN = [b'{"type": "sticker", "id": "x"}', b'{"type": "future"}']
@@ -178,6 +223,42 @@ ANNOUNCE_INVALID = [
     json.dumps({"type": "hello", "version": PROTOCOL_VERSION, "id": UID}).encode(),
     json.dumps({"type": "announce", "version": PROTOCOL_VERSION, "id": UID, "port": 1}).encode(),
 ]
+
+
+MANIFEST_URL = "https://github.com/Andoromain/socket-python/releases/latest/download/latest.json"
+
+
+def update_manifest() -> dict[str, object]:
+    """Manifeste ``latest.json`` produit par le vrai ``make_latest.py`` (contenu fixe)."""
+    spec = importlib.util.spec_from_file_location(
+        "make_latest", ROOT / "scripts" / "make_latest.py"
+    )
+    assert spec is not None and spec.loader is not None
+    make_latest = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(make_latest)
+    with tempfile.TemporaryDirectory() as tmp:
+        dist = Path(tmp)
+        for name, size in [
+            ("socket-chat-9.8.7-windows-setup.exe", 300),
+            ("socket-chat-9.8.7-linux-x86_64.tar.gz", 150),
+            ("socket-chat-9.8.7-android.apk", 210),
+        ]:
+            (dist / name).write_bytes(bytes(i % 251 for i in range(size)))
+        changelog = dist / "CHANGELOG.md"
+        changelog.write_text("## 9.8.7\n\n### Ajouté\n- Une nouveauté « accentuée ».\n", "utf-8")
+        manifest = make_latest.build_manifest(dist, "9.8.7", changelog, "2026-11-06")
+    return {"url": MANIFEST_URL, "manifest": manifest}
+
+
+def update_signature() -> dict[str, str]:
+    """Manifeste signé par le vrai ``signing.sign`` avec une clé de test fixe."""
+    private_key = base64.b64encode(bytes(range(100, 132))).decode("ascii")
+    data = json.dumps(update_manifest()["manifest"], ensure_ascii=False, indent=2).encode()
+    return {
+        "public_key": signing.public_key_of(private_key),
+        "manifest": _b64(data),
+        "signature": signing.sign(data, private_key),
+    }
 
 
 def build() -> dict[str, object]:
@@ -225,6 +306,8 @@ def build() -> dict[str, object]:
         "safety_numbers": [
             {"a": _b64(a), "b": _b64(b), "number": safety_number(a, b)} for a, b in SAFETY_KEYS
         ],
+        "update_manifest": update_manifest(),
+        "update_signature": update_signature(),
     }
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import getpass
 import logging
+import os
 import sys
 from importlib.resources import files
 from logging.handlers import RotatingFileHandler
@@ -33,6 +34,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         action="store_true",
         help="vérifier tout de suite les mises à jour et installer sans demander",
     )
+    # Vérification de l'exécutable construit (CI) : le moteur des appels démarre-t-il ?
+    parser.add_argument("--check-calls", action="store_true", help=argparse.SUPPRESS)
     # Les options propres à Qt (-platform, -style…) sont transmises telles quelles.
     args, qt_args = parser.parse_known_args(argv)
     args.qt_args = qt_args
@@ -99,8 +102,54 @@ def open_history(data_dir: Path):
     )
 
 
+def prepare_webengine() -> None:
+    """Réglages de Qt WebEngine (appels), à faire avant de créer l'application."""
+    from PySide6.QtCore import QCoreApplication, Qt
+
+    QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
+    # Ubuntu 24.04 et d'autres interdisent les espaces de noms utilisateur au programme
+    # qui n'a pas de profil AppArmor : le bac à sable de Chrome ne peut alors pas
+    # démarrer et WebEngine s'arrête. La page des appels n'affiche que notre propre
+    # contenu local (aucun site web) : on se passe du bac à sable dans ce cas.
+    if sys.platform.startswith("linux") and "QTWEBENGINE_DISABLE_SANDBOX" not in os.environ:
+        try:
+            flag = Path("/proc/sys/kernel/apparmor_restrict_unprivileged_userns").read_text()
+        except OSError:
+            flag = "0"
+        if flag.strip() == "1" or os.geteuid() == 0:
+            os.environ["QTWEBENGINE_DISABLE_SANDBOX"] = "1"
+
+
+def check_calls(timeout_ms: int = 60_000) -> int:
+    """Charge la page des appels (WebEngine) puis quitte : 0 si elle répond."""
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QApplication
+
+    from .call_engine import CallHost
+
+    prepare_webengine()
+    app = QApplication.instance() or QApplication([sys.argv[0]])
+    host = CallHost()
+    result = {"code": 1}
+
+    def on_ready() -> None:
+        result["code"] = 0
+        app.quit()
+
+    host.bridge.page_ready.connect(on_ready)
+    QTimer.singleShot(timeout_ms, app.quit)
+    host.ensure_page()
+    if not host.ready:
+        app.exec()
+    if sys.stdout is not None:
+        print("Moteur des appels :", "prêt" if result["code"] == 0 else "ne répond pas")
+    return result["code"]
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
+    if args.check_calls:
+        return check_calls()
 
     from PySide6.QtCore import QStandardPaths
     from PySide6.QtGui import QIcon
@@ -120,6 +169,7 @@ def main(argv: list[str] | None = None) -> int:
     QApplication.setApplicationVersion(__version__)
     QApplication.setDesktopFileName("socket-chat")
 
+    prepare_webengine()
     app = QApplication([sys.argv[0], *args.qt_args])
     icon = QIcon(icon_path())
     app.setWindowIcon(icon)
@@ -146,7 +196,7 @@ def main(argv: list[str] | None = None) -> int:
     settings = Settings()
     store, history_warning = open_history(data_dir)
     keys = identity.load_or_create(data_dir / "identity.key")
-    messenger = Messenger(store, settings.user_id, settings.name, keys)
+    messenger = Messenger(store, settings.user_id, settings.name, keys, avatar=settings.avatar)
     allowed_networks = settings.allowed_networks
     if allowed_networks:
         log.info("Réseaux autorisés : %s", ", ".join(map(str, allowed_networks)))
@@ -170,7 +220,23 @@ def main(argv: list[str] | None = None) -> int:
     else:
         log.warning("Détection automatique indisponible : ajout par adresse uniquement")
 
-    window = MainWindow(settings, messenger, discovery)
+    calls = None
+    ring = None
+    video_view = None
+    try:
+        from .call_engine import CallHost, WebEngineCallEngine
+        from .calls import CallManager
+
+        call_host = CallHost(messenger)
+        calls = CallManager(messenger, lambda: WebEngineCallEngine(call_host), messenger)
+        ring = call_host.ring
+        video_view = call_host.create_view
+    except ImportError as exc:  # installation sans Qt WebEngine : pas d'appels
+        log.warning("Appels indisponibles : %s", exc)
+
+    window = MainWindow(
+        settings, messenger, discovery, calls=calls, ring=ring, video_view=video_view
+    )
     if history_warning:
         QMessageBox.warning(None, "Socket Chat", history_warning)
     banner = UpdateBanner(window)
@@ -211,6 +277,8 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     def shutdown() -> None:
+        if calls is not None:
+            calls.stop()
         updates.stop()
         discovery.stop()
         messenger.stop()

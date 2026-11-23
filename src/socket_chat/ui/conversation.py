@@ -261,6 +261,8 @@ class ConversationView(QWidget):
     """Affiche une conversation ; ne connaît le réseau qu'à travers ``Messenger``."""
 
     message_error = Signal(str)
+    call_requested = Signal(str)  # contact à appeler
+    video_call_requested = Signal(str)  # contact à appeler en vidéo
 
     def __init__(
         self, messenger: Messenger, settings: Settings | None = None, parent: QWidget | None = None
@@ -349,6 +351,24 @@ class ConversationView(QWidget):
         header_layout.addWidget(self.avatar)
         header_layout.addSpacing(6)
         header_layout.addLayout(titles, 1)
+        self.call_button = QToolButton(header)
+        self.call_button.setText("📞")
+        self.call_button.setAutoRaise(True)
+        self.call_button.setToolTip("Appel audio")
+        self.call_button.setVisible(False)  # affiché si les appels sont disponibles
+        self.call_button.clicked.connect(
+            lambda: self.contact_id and self.call_requested.emit(self.contact_id)
+        )
+        header_layout.addWidget(self.call_button)
+        self.video_button = QToolButton(header)
+        self.video_button.setText("🎥")
+        self.video_button.setAutoRaise(True)
+        self.video_button.setToolTip("Appel vidéo")
+        self.video_button.setVisible(False)  # affiché si les appels sont disponibles
+        self.video_button.clicked.connect(
+            lambda: self.contact_id and self.video_call_requested.emit(self.contact_id)
+        )
+        header_layout.addWidget(self.video_button)
         self.lock_button = self._tool_button(
             header, "🔒", "Chiffrement : vérifier le code de sécurité"
         )
@@ -679,7 +699,11 @@ class ConversationView(QWidget):
         if contact is None:
             return
         self.name_label.setText(contact.name)
-        self.avatar.setPixmap(avatar_pixmap(contact.name, contact.id, 40, self.devicePixelRatioF()))
+        self.avatar.setPixmap(
+            avatar_pixmap(
+                contact.name, contact.id, 40, self.devicePixelRatioF(), photo=contact.avatar
+            )
+        )
         if self._messenger.is_typing(contact.id):
             status = "écrit…"
         elif self._messenger.is_online(contact.id):
@@ -691,6 +715,12 @@ class ConversationView(QWidget):
         self.changed_banner.setVisible(contact.pending_key is not None)
         self.refused_banner.label.setText(refused_key_text(contact.name))
         self.refused_banner.setVisible(contact.id in self._refused_by)
+        online = self._messenger.is_connected(contact.id) or self._messenger.is_online(contact.id)
+        self.call_button.setEnabled(online)
+        offline = "" if online else " : contact hors ligne"
+        self.call_button.setToolTip("Appel audio" + offline)
+        self.video_button.setEnabled(online)
+        self.video_button.setToolTip("Appel vidéo" + offline)
 
     def changeEvent(self, event: QEvent) -> None:  # noqa: N802 - API Qt
         if event.type() == QEvent.Type.PaletteChange and hasattr(self, "list"):

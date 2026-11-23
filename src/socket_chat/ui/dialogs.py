@@ -7,16 +7,24 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QFormLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
+    QPushButton,
     QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
 from ..protocol import MAX_NAME_LENGTH, validate_name
+from ..transfers import make_avatar
+from .theme import avatar_pixmap
+
+#: Images proposées pour la photo de profil.
+IMAGE_FILTER = "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp)"
 
 
 def _port_spinbox(value: int, parent: QWidget) -> QSpinBox:
@@ -38,9 +46,13 @@ class SettingsDialog(QDialog):
         close_to_tray: bool = True,
         tray_available: bool = True,
         first_run: bool = False,
+        avatar: bytes = b"",
+        user_id: str = "",
     ):
         super().__init__(parent)
         self.setWindowTitle("Bienvenue" if first_run else "Préférences")
+        self._avatar = avatar
+        self._user_id = user_id
 
         self.name_edit = QLineEdit(name, self)
         self.name_edit.setMaxLength(MAX_NAME_LENGTH)
@@ -53,7 +65,22 @@ class SettingsDialog(QDialog):
         self.tray_check.setChecked(close_to_tray and tray_available)
         self.tray_check.setEnabled(tray_available)
 
+        self.avatar_label = QLabel(self)
+        self.avatar_label.setFixedSize(64, 64)
+        self.choose_photo = QPushButton("&Choisir une photo…", self)
+        self.choose_photo.clicked.connect(self._choose_photo)
+        self.remove_photo = QPushButton("&Retirer", self)
+        self.remove_photo.clicked.connect(self._remove_photo)
+        photo_row = QHBoxLayout()
+        photo_row.addWidget(self.avatar_label)
+        photo_row.addWidget(self.choose_photo)
+        photo_row.addWidget(self.remove_photo)
+        photo_row.addStretch(1)
+        self.name_edit.textChanged.connect(self._refresh_avatar)
+        self._refresh_avatar()
+
         form = QFormLayout()
+        form.addRow("Photo :", photo_row)
         form.addRow("&Nom d'affichage :", self.name_edit)
         form.addRow("&Port :", self.port_spin)
         form.addRow(self.tray_check)
@@ -75,6 +102,36 @@ class SettingsDialog(QDialog):
     @property
     def name(self) -> str:
         return validate_name(self.name_edit.text())
+
+    @property
+    def avatar(self) -> bytes:
+        """Photo de profil choisie (``b""`` : aucune)."""
+        return self._avatar
+
+    def set_photo_from_file(self, path: str) -> bool:
+        """Prépare la photo à partir d'un fichier image ; ``False`` (et message) si illisible."""
+        try:
+            self._avatar = make_avatar(path)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Photo de profil", str(exc))
+            return False
+        self._refresh_avatar()
+        return True
+
+    def _choose_photo(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Choisir une photo de profil", "", IMAGE_FILTER)
+        if path:
+            self.set_photo_from_file(path)
+
+    def _remove_photo(self) -> None:
+        self._avatar = b""
+        self._refresh_avatar()
+
+    def _refresh_avatar(self) -> None:
+        name = self.name_edit.text().strip() or "?"
+        pixmap = avatar_pixmap(name, self._user_id, 64, self.devicePixelRatioF(), self._avatar)
+        self.avatar_label.setPixmap(pixmap)
+        self.remove_photo.setEnabled(bool(self._avatar))
 
     @property
     def port(self) -> int:

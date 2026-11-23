@@ -8,7 +8,9 @@ dynamic = ["version"]
 description = "Messagerie instantanée de poste à poste pour le réseau interne"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = ["PySide6-Essentials>=6.5", "cryptography>=42"]
+# WebEngine (moteur de Chrome) : appels audio et vidéo avec annulation d'écho.
+# cryptography : chiffrement des connexions, de l'historique et signature des mises à jour.
+dependencies = ["PySide6-Essentials>=6.5", "PySide6-WebEngine>=6.12", "cryptography>=42"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: Microsoft :: Windows",

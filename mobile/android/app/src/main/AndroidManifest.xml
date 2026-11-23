@@ -5,6 +5,31 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <!-- Sans verrou multicast, Android filtre le broadcast reçu (détection impossible). -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <!-- Mise à jour intégrée : ouvrir l'installateur sur l'APK téléchargé et vérifié. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Appels : micro (demandé au premier appel), écouteur ou haut-parleur, casque
+         Bluetooth, vibration de la sonnerie, écran éteint contre l'oreille. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Appels vidéo : caméra, demandée au premier appel vidéo. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Joignable application fermée : service au premier plan (messagerie, et micro
+         pendant un appel), relancé au démarrage du téléphone ; notifications des messages
+         et des appels (plein écran sur l'écran verrouillé) ; demande d'exclusion de
+         l'optimisation de batterie, proposée dans les Préférences. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- Pas de sauvegarde Android (cloud ni transfert) : l'historique et les clés restent
          sur ce téléphone ; la clé de l'historique ne quitte jamais Android Keystore. -->
@@ -12,7 +37,7 @@
         android:allowBackup="false"
         android:fullBackupContent="false"
         android:label="Socket Chat"
-        android:name="${applicationName}"
+        android:name=".SocketChatApplication"
         android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"
@@ -40,6 +65,31 @@
         <meta-data
             android:name="android.content.APP_RESTRICTIONS"
             android:resource="@xml/app_restrictions" />
+        <service
+            android:name=".MessagingService"
+            android:exported="false"
+            android:foregroundServiceType="remoteMessaging|microphone|camera" />
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name=".CallActionReceiver"
+            android:exported="false" />
+        <!-- Donne à l'installateur l'accès au seul dossier des mises à jour (cache/updates). -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.updates"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/update_paths" />
+        </provider>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

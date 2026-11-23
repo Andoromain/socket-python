@@ -7,6 +7,18 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as img;
+import 'package:socket_chat_mobile/app/avatar.dart';
+import 'package:socket_chat_mobile/net/calls.dart';
+import 'package:socket_chat_mobile/protocol/protocol.dart';
+import 'package:socket_chat_mobile/ui/call_screen.dart';
+import 'package:socket_chat_mobile/ui/settings_screen.dart';
+import 'package:socket_chat_mobile/app/controller.dart';
+import 'package:socket_chat_mobile/app/settings.dart';
+import 'package:socket_chat_mobile/updates/app_updater.dart';
+
+import '../app_updater_test.dart' show FakeClient, FakeInstaller, manifest;
+
 import 'package:socket_chat_mobile/store/store.dart';
 import 'package:socket_chat_mobile/ui/app.dart';
 
@@ -34,6 +46,13 @@ ThemeData screenshotTheme(Brightness brightness) {
 
 /// Capture avec de vraies ombres (les tests les dessinent sinon en noir opaque).
 Future<void> capture(WidgetTester tester, Finder finder, String path) async {
+  // Le décodage des images est asynchrone : on l'attend pour que les photos apparaissent.
+  await tester.runAsync(() async {
+    for (final element in find.byType(Image).evaluate()) {
+      await precacheImage((element.widget as Image).image, element);
+    }
+  });
+  await tester.pump();
   debugDisableShadows = false;
   try {
     for (final view in tester.binding.renderViews) {
@@ -50,11 +69,32 @@ Future<void> capture(WidgetTester tester, Finder finder, String path) async {
   }
 }
 
+/// Portrait stylisé (dégradé, visage, épaules) pour les captures.
+Uint8List portrait(img.Color top, img.Color bottom) {
+  final image = img.Image(width: 400, height: 400);
+  for (var y = 0; y < 400; y++) {
+    final t = y / 400;
+    final color = img.ColorRgb8(
+      (top.r * (1 - t) + bottom.r * t).round(),
+      (top.g * (1 - t) + bottom.g * t).round(),
+      (top.b * (1 - t) + bottom.b * t).round(),
+    );
+    img.drawLine(image, x1: 0, y1: y, x2: 399, y2: y, color: color);
+  }
+  img.fillCircle(image, x: 200, y: 420, radius: 150, color: img.ColorRgb8(40, 60, 90));
+  img.fillCircle(image, x: 200, y: 170, radius: 90, color: img.ColorRgb8(241, 194, 125));
+  img.fillCircle(image, x: 200, y: 110, radius: 70, color: img.ColorRgb8(59, 42, 26));
+  img.fillCircle(image, x: 200, y: 185, radius: 75, color: img.ColorRgb8(241, 194, 125));
+  return makeAvatar(img.encodePng(image));
+}
+
 void richHistory(Store store) {
   populate(store);
+  store.setAvatar(alice, portrait(img.ColorRgb8(109, 213, 237), img.ColorRgb8(33, 147, 176)));
   final now = DateTime.now().millisecondsSinceEpoch;
   const carol = '33333333-3333-4333-8333-333333333333';
   store.upsertContact(carol, 'Chloé Bernard', lastSeen: now - 3 * 86400000);
+  store.setAvatar(carol, portrait(img.ColorRgb8(247, 151, 30), img.ColorRgb8(255, 210, 0)));
   store.addMessage(MessageRecord(mid(20), carol, true, 'Bon week-end ! 🎉', now - 3 * 86400000, Status.read));
   store.addMessage(
     MessageRecord(mid(10), alice, true, 'Je prends le rétroprojecteur 📽️', now - 3000, Status.delivered),
@@ -106,5 +146,103 @@ void main() {
     await tester.pumpWidget(SocketChatApp(controller: controller, theme: screenshotTheme, themeMode: ThemeMode.light));
     await tester.pumpAndSettle();
     await capture(tester, find.byType(MaterialApp), '$output/0-bienvenue.png');
+  });
+
+  testWidgets('capture préférences avec photo', (tester) async {
+    if (output == null) return;
+    await tester.runAsync(loadFonts);
+    tester.view.physicalSize = const Size(1080, 2340);
+    tester.view.devicePixelRatio = 2.75;
+    addTearDown(tester.view.reset);
+    final controller = await makeController(name: 'Jean Dupont');
+    controller.settings.avatar = portrait(img.ColorRgb8(168, 224, 99), img.ColorRgb8(86, 171, 47));
+    controller.messenger.setAvatar(controller.settings.avatar);
+    await tester.pumpWidget(
+      MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: screenshotTheme(Brightness.light),
+        home: SettingsScreen(controller: controller),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await capture(tester, find.byType(MaterialApp), '$output/5-preferences.png');
+  });
+
+  testWidgets('capture bandeau de mise à jour', (tester) async {
+    if (output == null) return;
+    await tester.runAsync(loadFonts);
+    tester.view.physicalSize = const Size(1080, 2340);
+    tester.view.devicePixelRatio = 2.75;
+    addTearDown(tester.view.reset);
+    final updater = AppUpdater(
+      currentVersion: '3.5.0',
+      client: FakeClient(() => manifest('3.6.0')),
+      installer: FakeInstaller(),
+      downloadDirectory: () async => Directory.systemTemp,
+    );
+    final prefs = MemoryPreferenceStore()..values['name'] = 'Jean Dupont';
+    final controller = ChatController(
+      Store(),
+      await Settings.load(prefs),
+      useNetwork: false,
+      useDiscovery: false,
+      updater: updater,
+    );
+    richHistory(controller.store);
+    await tester.runAsync(updater.check);
+    await tester.pumpWidget(SocketChatApp(controller: controller, theme: screenshotTheme, themeMode: ThemeMode.light));
+    await tester.pumpAndSettle();
+    await capture(tester, find.byType(MaterialApp), '$output/6-mise-a-jour.png');
+    updater.progress = 0.42;
+    updater.notifyListeners(); // ignore: invalid_use_of_protected_member, invalid_use_of_visible_for_testing_member
+    await tester.pump();
+    await capture(tester, find.byType(MaterialApp), '$output/7-telechargement.png');
+  });
+
+  testWidgets('captures appel', (tester) async {
+    if (output == null) return;
+    await tester.runAsync(loadFonts);
+    tester.view.physicalSize = const Size(1080, 2340);
+    tester.view.devicePixelRatio = 2.75;
+    addTearDown(tester.view.reset);
+    final controller = await makeController(name: 'Jean Dupont');
+    richHistory(controller.store);
+    final now = DateTime.now().millisecondsSinceEpoch;
+    controller.store.addMessage(
+      MessageRecord(
+        newId(),
+        alice,
+        true,
+        '',
+        now - 1500,
+        Status.read,
+        call: CallInfo('audio', CallOutcome.completed, 192),
+      ),
+    );
+    controller.store.addMessage(
+      MessageRecord(newId(), alice, false, '', now - 1000, Status.read, call: CallInfo('audio', CallOutcome.missed, 0)),
+    );
+    final call = Call(newId(), alice, 'audio', false, CallState.incoming);
+    controller.calls.call = call;
+    await tester.pumpWidget(
+      MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: screenshotTheme(Brightness.light),
+        home: CallScreen(controller: controller),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await capture(tester, find.byType(MaterialApp), '$output/8-appel-entrant.png');
+    call.state = CallState.active;
+    call.muted = true;
+    controller.calls.stateChanged.emit(call);
+    await tester.pump();
+    await capture(tester, find.byType(MaterialApp), '$output/9-appel-en-cours.png');
+    controller.calls.call = null;
+    await tester.pumpWidget(SocketChatApp(controller: controller, theme: screenshotTheme, themeMode: ThemeMode.light));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Alice Martin'));
+    await tester.pumpAndSettle();
+    await capture(tester, find.byType(MaterialApp), '$output/10-historique-appels.png');
   });
 }

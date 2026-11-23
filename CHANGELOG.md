@@ -1,5 +1,25 @@
 # Journal des modifications
 
+## 4.1.0
+
+Réunit les deux lignées de Socket Chat : les nouveautés des versions 3.4 à 3.8 (photo
+de profil, appels audio et vidéo, application Android joignable fermée et mise à jour
+intégrée) et la sécurité de la 4.0 (chiffrement de bout en bout, historique chiffré,
+mises à jour signées, réseaux autorisés).
+
+**Protocole 4** : les postes et téléphones en 3.x doivent être mis à jour (installation
+à la main une fois). Les appels passent par la connexion chiffrée de Socket Chat ; le son
+et l'image sont eux-mêmes chiffrés par WebRTC (DTLS-SRTP).
+
+### Modifié
+- Mise à jour intégrée d'Android : lit les Releases de ce dépôt et n'installe une
+  version que si son manifeste est signé (comme sur PC).
+- Historique : un historique venu d'une 3.4 à 3.8 (photo de profil) comme d'une 4.0
+  (clés) est mis à niveau sans perte et chiffré.
+
+### Corrigé
+- Fenêtre du code de sécurité : le texte n'est plus coupé (constaté sous GNOME).
+
 ## 4.0.1
 
 Compatible avec la 4.0 (même protocole).
@@ -62,6 +82,115 @@ temps que sur les postes.
   avec vos collègues proches.
 - Ne copiez pas le profil Socket Chat d'un poste à un autre : l'historique chiffré n'y
   serait pas lisible (il est alors mis de côté, jamais effacé).
+## 3.8.1
+
+Compatible avec la 3.8 (même protocole) : rien ne change sur les postes Windows et Linux.
+
+### Amélioré
+- **Mise à jour Android trois fois plus légère** : chaque version est aussi publiée en
+  un APK par type de processeur (`android-arm64-v8a`, `android-armeabi-v7a`,
+  `android-x86_64`). À partir de la 3.8.1, la mise à jour intégrée télécharge celui du
+  téléphone au lieu de l'APK universel.
+
+### À savoir
+- La mise à jour vers la 3.8.1 elle-même passe encore par l'APK universel (les versions
+  précédentes ne connaissent que lui) ; les suivantes seront légères.
+- L'APK universel reste publié pour l'installation à la main sur n'importe quel téléphone.
+
+## 3.8.0
+
+Compatible avec la 3.6 et la 3.7 (même protocole). Un correspondant encore en 3.6 ou
+3.7 peut répondre à un appel vidéo, mais sans en voir l'image : mettre tout le monde à
+jour (les PC et les téléphones se mettent à jour d'eux-mêmes).
+
+### Ajouté
+- **Appels vidéo** entre PC et téléphones, dans tous les sens : bouton 🎥 à côté de 📞
+  dans l'en-tête de conversation, « Appel vidéo entrant » (fenêtre, notification).
+- **PC** : l'image du correspondant s'affiche dans la fenêtre d'appel, la sienne en
+  incrustation (effet miroir) ; **Couper la caméra** / **Rétablir la caméra**.
+- **Android** : image du correspondant en plein écran, la sienne en incrustation ;
+  boutons micro, caméra, **retourner** (caméra avant ou arrière) et raccrocher ;
+  haut-parleur d'office. Application fermée, l'appel vidéo sonne en plein écran comme
+  un appel audio ; la caméra reste active écran éteint pendant l'appel.
+- Historique : 🎥 « Appel vidéo · 3 min 12 ».
+
+### À savoir
+- Android demande l'accès à la **caméra** au premier appel vidéo.
+- Caméra coupée, le correspondant voit une image noire ; l'appel continue.
+
+## 3.7.0
+
+Compatible avec la 3.6 (même protocole) : rien ne change sur les postes Windows et Linux.
+
+### Ajouté
+- **Android joignable application fermée** : Socket Chat reste actif en arrière-plan
+  (service au premier plan, notification permanente discrète), y compris après un
+  redémarrage du téléphone ou une mise à jour.
+- **Notifications** des nouveaux messages et des appels manqués, une par conversation
+  (les derniers messages non lus) ; un toucher ouvre la conversation. Rien n'est notifié
+  pour la conversation affichée à l'écran.
+- **Appel entrant application fermée** : sonnerie et vibration selon le mode du
+  téléphone, affichage en plein écran même téléphone verrouillé, boutons **Répondre** et
+  **Refuser** dans la notification. Pendant l'appel, le micro reste actif écran éteint
+  ou application en arrière-plan.
+- Préférences › **Rester joignable** (activé par défaut), avec les autorisations encore
+  manquantes et un bouton vers chaque réglage d'Android : notifications, appels en plein
+  écran (Android 14+), optimisation de la batterie.
+
+## 3.6.0
+
+Compatible avec la 3.5 (même protocole) : un poste en version antérieure ignore les
+appels, et l'appelant en est averti.
+
+### Ajouté
+- **Appels audio** entre PC (Windows, Linux) et téléphones Android, dans tous les sens :
+  bouton 📞 en haut de la conversation, fenêtre ou écran d'appel entrant (Répondre,
+  Refuser) avec sonnerie, puis appel en cours (durée, couper le micro, raccrocher ; sur
+  Android : haut-parleur ou écouteur, écran éteint contre l'oreille). Le son passe
+  directement d'un appareil à l'autre, chiffré, sans serveur (WebRTC, codec Opus), avec
+  annulation d'écho, réduction de bruit et réglage automatique du volume du micro.
+- Les appels sont notés dans la conversation (« Appel audio · 3 min 12 », « Appel
+  manqué », « Appel refusé »…) ; un appel manqué est signalé comme un message non lu.
+- Cas prévus : correspondant occupé, pas de réponse au bout de 30 secondes, appels
+  croisés, coupure du réseau, correspondant en version trop ancienne.
+
+### À savoir
+- Sur PC, les appels utilisent le moteur de Chrome intégré à Qt (Qt WebEngine) :
+  les installeurs passent à environ 100 Mo (environ 30 Mo auparavant).
+- Windows : au premier appel, autoriser **QtWebEngineProcess** si le pare-feu le
+  demande (l'option « pare-feu » de l'installeur en mode administrateur le fait).
+- Android : l'application doit être ouverte pour recevoir un appel ; la 3.7 le fera
+  sonner même fermée.
+
+## 3.5.0
+
+Compatible avec la 3.4 (même protocole) : rien ne change sur les postes Windows et Linux.
+
+### Ajouté
+- **Mise à jour proposée par l'application Android**, comme sur PC : vérification au
+  démarrage, au retour dans l'application (au plus toutes les 6 heures) ou depuis
+  Préférences › Rechercher une mise à jour. Un bandeau annonce la nouvelle version
+  (Nouveautés, Plus tard, Mettre à jour) ; l'APK est téléchargé en HTTPS, sa taille et
+  son empreinte SHA-256 sont vérifiées, puis l'installation s'ouvre (Android la fait
+  toujours confirmer). La première fois, l'écran d'autorisation « installer des
+  applications » s'ouvre directement.
+
+### À savoir
+- Depuis une version antérieure, installer la 3.5.0 à la main une dernière fois : les
+  versions suivantes seront proposées par l'application.
+
+## 3.4.0
+
+Compatible avec la 3.3 (même protocole) : un poste en version antérieure ignore
+simplement les photos.
+
+### Ajouté
+- **Photo de profil**, sur PC et sur Android : chacun choisit la sienne dans les
+  Préférences (fichier image sur PC ; galerie ou appareil photo sur Android). Elle est
+  recadrée en carré, réduite, puis envoyée automatiquement aux collègues, qui la voient
+  à la place des initiales dans la liste des contacts et l'en-tête de conversation. Un
+  changement ou un retrait est transmis aussitôt aux collègues connectés, et aux autres
+  à leur prochaine connexion.
 
 ## 3.3.1
 
