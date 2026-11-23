@@ -106,7 +106,7 @@ jobs:
           version=$(sed -n 's/^version: *\([0-9.]*\)+.*/\1/p' pubspec.yaml)
           mkdir -p dist
           cp build/app/outputs/flutter-apk/app-release.apk "dist/socket-chat-$version-android-test.apk"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: socket-chat-android-test
           path: mobile/dist/*.apk

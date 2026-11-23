@@ -58,7 +58,7 @@ jobs:
         run: choco install innosetup -y --no-progress
       - run: pip install ".[build]"
       - run: python scripts/build.py
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: socket-chat-${{ runner.os }}
           path: |
@@ -155,7 +155,7 @@ jobs:
             fi
           done
           ls -la ../dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: socket-chat-Android
           path: dist/*.apk
@@ -198,7 +198,7 @@ jobs:
           fi
           pip install "cryptography>=42"
           python scripts/sign_manifest.py dist/latest.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-files
           path: |
