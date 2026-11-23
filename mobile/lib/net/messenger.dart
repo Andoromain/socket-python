@@ -54,10 +54,17 @@ typedef Thumbnailer = Uint8List Function(String path);
 Uint8List _noThumbnail(String path) => Uint8List(0);
 
 class Messenger {
-  Messenger(this.store, this.userId, String name, {this.thumbnailer = _noThumbnail, noise.KeyPair? identity})
-    : _name = validateName(name),
-      identity = identity ?? noise.KeyPair.generate(),
-      transfers = FileTransfers(store) {
+  Messenger(
+    this.store,
+    this.userId,
+    String name, {
+    this.thumbnailer = _noThumbnail,
+    noise.KeyPair? identity,
+    Uint8List? avatar,
+  }) : _name = validateName(name),
+       identity = identity ?? noise.KeyPair.generate(),
+       _avatar = avatar != null && isAvatarImage(avatar) ? avatar : Uint8List(0),
+       transfers = FileTransfers(store) {
     transfers.changed.connect(_onTransferChanged);
     transfers.progress.connect(fileProgress.emit);
   }
@@ -95,6 +102,15 @@ class Messenger {
 
   /// Contact, refuse notre clé (il en connaît une autre pour cet appareil).
   final Signal<(String, bool)> keyRefused = Signal();
+
+  /// Contact dont la photo de profil a changé.
+  final Signal<String> avatarChanged = Signal();
+
+  /// Contact, trame d'appel (voir calls.dart).
+  final Signal<(String, Message)> callFrame = Signal();
+
+  /// La connexion avec ce contact vient de se fermer.
+  final Signal<String> peerDisconnected = Signal();
   final Signal<String> error = Signal();
 
   RawServerSocket? _server;
@@ -124,6 +140,22 @@ class Messenger {
   // -- Propriétés ------------------------------------------------------
   String get name => _name;
   set name(String value) => _name = validateName(value);
+
+  Uint8List _avatar;
+
+  /// Notre photo de profil (vide : aucune).
+  Uint8List get avatar => _avatar;
+
+  /// Change (ou retire avec une liste vide) notre photo et l'envoie aux contacts connectés.
+  void setAvatar(Uint8List data) {
+    if (data.isNotEmpty && !isAvatarImage(data)) {
+      throw ArgumentError('Photo de profil invalide (JPEG ou PNG de 32 Ko au plus).');
+    }
+    _avatar = data;
+    for (final conn in _connections.values) {
+      if (conn.isReady) conn.send(Message.avatar(data));
+    }
+  }
 
   int? get port => _server?.port;
   bool get running => _server != null;
@@ -347,6 +379,35 @@ class Messenger {
     conn.send(Message.typing(active));
   }
 
+  /// Connexion établie avec ce contact (nécessaire pour un appel).
+  bool isConnected(String contactId) => _connections[contactId]?.isReady ?? false;
+
+  /// Envoie une trame au contact s'il est connecté ; `false` sinon.
+  bool sendTo(String contactId, Message message) {
+    final conn = _connections[contactId];
+    if (conn == null || !conn.isReady) return false;
+    conn.send(message);
+    return true;
+  }
+
+  /// Note un appel dans la conversation (localement).
+  MessageRecord addCallRecord(String contactId, bool outgoing, CallInfo call) {
+    final unread = !outgoing && (call.outcome == CallOutcome.missed || call.outcome == CallOutcome.cancelled);
+    final record = MessageRecord(
+      newId(),
+      contactId,
+      outgoing,
+      '',
+      nowMs(),
+      unread ? Status.delivered : Status.read,
+      call: call,
+    );
+    store.addMessage(record);
+    messageAdded.emit(record);
+    contactsChanged.emit(null);
+    return record;
+  }
+
   /// Se connecte à une adresse ; le contact est créé à sa présentation.
   void addContact(String host, int port) {
     _manual.add(_dial(host, port));
@@ -482,6 +543,7 @@ class Messenger {
     for (final messageId in _pendingDeclines.remove(peerId) ?? <String>{}) {
       conn.send(Message.fileAnswer(messageId, false));
     }
+    if (_avatar.isNotEmpty) conn.send(Message.avatar(_avatar));
   }
 
   void _onMessage(PeerConnection conn, Message message) {
@@ -511,6 +573,18 @@ class Messenger {
         }
       case MessageType.typing:
         _setPeerTyping(peerId, message.active);
+      case MessageType.avatar:
+        if (store.setAvatar(peerId, message.data ?? Uint8List(0))) {
+          avatarChanged.emit(peerId);
+          contactsChanged.emit(null);
+        }
+      case MessageType.callInvite ||
+          MessageType.callRinging ||
+          MessageType.callAccept ||
+          MessageType.callSdp ||
+          MessageType.callIce ||
+          MessageType.callEnd:
+        callFrame.emit((peerId, message));
       case MessageType.hello || MessageType.bye:
         break;
     }
@@ -566,6 +640,7 @@ class Messenger {
     if (peerId != null && _connections[peerId] == conn) {
       _connections.remove(peerId);
       _typingSent.remove(peerId);
+      peerDisconnected.emit(peerId);
       if (!isOnline(peerId)) {
         _setPeerTyping(peerId, false);
         presenceChanged.emit((peerId, false));

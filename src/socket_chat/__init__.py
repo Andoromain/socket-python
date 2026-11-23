@@ -1,3 +1,3 @@
 """Socket Chat — messagerie instantanée de poste à poste pour le réseau interne."""
 
-__version__ = "4.0.1"
+__version__ = "4.1.0"

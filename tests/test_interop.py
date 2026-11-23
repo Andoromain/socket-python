@@ -8,6 +8,7 @@ les dépendances Flutter n'ont pas été récupérées (``flutter pub get`` dans
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -213,6 +214,25 @@ def test_pc_dials_phone_and_sees_it_leave(qtbot, make_messenger, phone):
         phone.close()  # « bye » puis fermeture
 
 
+def test_profile_photos_in_both_directions(qtbot, make_messenger, phone):
+    jpeg = b"\xff\xd8\xff\xe0" + os.urandom(20_000)
+    pc = make_messenger("Poste PC")
+    pc.set_avatar(jpeg)  # envoyée dès que la connexion est prête
+    with qtbot.waitSignal(pc.presence_changed, timeout=TIMEOUT):
+        phone.command("connect", host="127.0.0.1", port=pc.port)
+    received = phone.wait(qtbot, "avatar", contact=pc.user_id)
+    assert base64.b64decode(received["data"]) == jpeg
+
+    png = b"\x89PNG\r\n\x1a\n" + os.urandom(5_000)
+    with qtbot.waitSignal(pc.avatar_changed, timeout=TIMEOUT):
+        phone.command("avatar", data=base64.b64encode(png).decode())
+    assert pc.store.contact(phone.id).avatar == png
+
+    with qtbot.waitSignal(pc.avatar_changed, timeout=TIMEOUT):
+        phone.command("avatar", data="")  # photo retirée
+    assert pc.store.contact(phone.id).avatar == b""
+
+
 def test_udp_discovery_between_pc_and_phone(qtbot, make_messenger, phone):
     pc = make_messenger("Poste PC")
     disc = Discovery(pc.user_id, "Poste PC", pc.port, udp_port=0, targets=[])
@@ -232,3 +252,47 @@ def test_udp_discovery_between_pc_and_phone(qtbot, make_messenger, phone):
     finally:
         disc.stop()
         disc.deleteLater()
+
+
+def test_calls_signaling_between_pc_and_phone(qtbot, make_messenger, phone):
+    """Appels : signalisation réelle des deux côtés, média simulé (pas de micro en CI)."""
+    from test_calls import FakeEngine
+
+    from socket_chat.calls import CallManager, CallState
+
+    pc = connected(qtbot, make_messenger, phone)
+    calls = CallManager(pc, FakeEngine, parent=pc)
+
+    # PC → téléphone : sonnerie, décroché, conversation, raccroché par le PC.
+    call = calls.start_call(phone.id)
+    phone.wait(qtbot, "incoming_call", contact=pc.user_id, media="audio")
+    qtbot.waitUntil(
+        lambda: calls.call and calls.call.state is CallState.RINGING_OUT, timeout=TIMEOUT
+    )
+    phone.command("accept_call")
+    qtbot.waitUntil(lambda: calls.call and calls.call.state is CallState.ACTIVE, timeout=TIMEOUT)
+    phone.wait(qtbot, "call_state", state="active", id=call.id)
+    with qtbot.waitSignal(calls.call_ended, timeout=TIMEOUT):
+        calls.hangup()
+    phone.wait(qtbot, "call_ended", contact=pc.user_id, outcome="completed")
+
+    # Téléphone → PC : refusé par le PC.
+    with qtbot.waitSignal(calls.incoming_call, timeout=TIMEOUT) as blocker:
+        phone.command("call", to=pc.user_id)
+    assert blocker.args == [phone.id, "audio"]
+    phone.wait(qtbot, "call_state", state="ringingOut")
+    calls.decline()
+    phone.wait(qtbot, "call_ended", contact=pc.user_id, outcome="declined")
+
+    # Appel vidéo téléphone → PC : décroché par le PC, raccroché par le téléphone.
+    with qtbot.waitSignal(calls.incoming_call, timeout=TIMEOUT) as blocker:
+        phone.command("call", to=pc.user_id, media="video")
+    assert blocker.args == [phone.id, "video"]
+    calls.accept()
+    qtbot.waitUntil(lambda: calls.call and calls.call.state is CallState.ACTIVE, timeout=TIMEOUT)
+    assert calls.call.engine.media == "video"
+    with qtbot.waitSignal(calls.call_ended, timeout=TIMEOUT):
+        phone.command("hangup")
+    records = [m for m in pc.store.messages(phone.id) if m.call]
+    assert [m.call.outcome.value for m in records] == ["completed", "declined", "completed"]
+    assert records[-1].display_text.startswith("🎥 Appel vidéo · ")

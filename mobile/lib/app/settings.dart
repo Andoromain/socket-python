@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../net/noise.dart';
@@ -10,6 +13,7 @@ abstract interface class PreferenceStore {
   Future<int?> getInt(String key);
   Future<void> setString(String key, String value);
   Future<void> setInt(String key, int value);
+  Future<void> remove(String key);
 }
 
 class SharedPreferenceStore implements PreferenceStore {
@@ -22,6 +26,8 @@ class SharedPreferenceStore implements PreferenceStore {
   Future<void> setString(String key, String value) => _prefs.setString(key, value);
   @override
   Future<void> setInt(String key, int value) => _prefs.setInt(key, value);
+  @override
+  Future<void> remove(String key) => _prefs.remove(key);
 }
 
 /// Préférences en mémoire (tests).
@@ -35,17 +41,30 @@ class MemoryPreferenceStore implements PreferenceStore {
   Future<void> setString(String key, String value) async => values[key] = value;
   @override
   Future<void> setInt(String key, int value) async => values[key] = value;
+  @override
+  Future<void> remove(String key) async => values.remove(key);
 }
 
 /// Préférences de l'appareil : identifiant stable, clé, nom affiché, port d'écoute.
 class Settings {
-  Settings._(this._prefs, this.userId, this.identity, this.name, this.port, this.allowedNetworks);
+  Settings._(
+    this._prefs,
+    this.userId,
+    this.identity,
+    this.name,
+    this.port,
+    this.allowedNetworks,
+    this.avatar,
+    this.keepRunning,
+  );
 
   static const _userIdKey = 'user_id';
   static const _nameKey = 'name';
   static const _portKey = 'port';
   static const _identityKey = 'identity_key';
   static const _networksKey = 'allowed_networks';
+  static const _avatarKey = 'avatar';
+  static const _keepRunningKey = 'keep_running';
 
   final PreferenceStore _prefs;
 
@@ -64,6 +83,12 @@ class Settings {
   /// aucune restriction). Une configuration gérée par l'administrateur l'emporte.
   String allowedNetworks;
 
+  /// Notre photo de profil (JPEG) ; vide si aucune.
+  Uint8List avatar;
+
+  /// Rester joignable application fermée (service au premier plan) ; activé par défaut.
+  bool keepRunning;
+
   static Future<Settings> load(PreferenceStore prefs, [SecretStore? secrets]) async {
     var userId = await prefs.getString(_userIdKey);
     if (!isValidId(userId)) {
@@ -78,6 +103,8 @@ class Settings {
       await prefs.getString(_nameKey),
       port != null && port > 0 && port < 65536 ? port : defaultPort,
       await prefs.getString(_networksKey) ?? '',
+      _decodeAvatar(await prefs.getString(_avatarKey)),
+      await prefs.getInt(_keepRunningKey) != 0,
     );
   }
 
@@ -97,5 +124,21 @@ class Settings {
     if (value != null) await _prefs.setString(_nameKey, value);
     await _prefs.setInt(_portKey, port);
     await _prefs.setString(_networksKey, allowedNetworks);
+    await _prefs.setInt(_keepRunningKey, keepRunning ? 1 : 0);
+    if (avatar.isEmpty) {
+      await _prefs.remove(_avatarKey);
+    } else {
+      await _prefs.setString(_avatarKey, base64Encode(avatar));
+    }
+  }
+
+  static Uint8List _decodeAvatar(String? raw) {
+    if (raw == null || raw.isEmpty) return Uint8List(0);
+    try {
+      final data = base64Decode(raw);
+      return isAvatarImage(data) ? data : Uint8List(0);
+    } on FormatException {
+      return Uint8List(0);
+    }
   }
 }

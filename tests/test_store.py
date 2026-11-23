@@ -321,3 +321,62 @@ def test_missing_columns_are_repaired(tmp_path):
     assert store.set_reaction("m1", ME, "👍")
     store.pin_key(A, "clé")
     assert store.contact(A).public_key == "clé"
+
+
+JPEG = b"\xff\xd8\xff\xe0photo"
+
+
+def test_contact_avatar():
+    store = Store()
+    store.upsert_contact(A, "Alice")
+    assert store.contact(A).avatar == b""
+    assert store.set_avatar(A, JPEG)
+    assert not store.set_avatar(A, JPEG)
+    assert store.contact(A).avatar == JPEG
+    store.upsert_contact(A, "Alice Martin", host="10.0.0.1")  # la photo est conservée
+    assert store.contacts()[0].contact.avatar == JPEG
+    assert store.set_avatar(A, b"")
+    assert store.contact(A).avatar == b""
+    assert not store.set_avatar(B, JPEG)  # contact inconnu
+
+
+def test_migration_from_schema_2(tmp_path):
+    """Une base de la 3.1 à la 3.3 (schéma 2) reçoit la colonne des photos."""
+    path = tmp_path / "v2.sqlite3"
+    old = Store(path)
+    old.upsert_contact(A, "Alice", host="10.0.0.1", port=12800)
+    old.add_message(msg(1))
+    old.close()
+    db = sqlite3.connect(path)
+    db.executescript("ALTER TABLE contacts DROP COLUMN avatar; PRAGMA user_version = 2;")
+    db.close()
+
+    store = Store(path)
+    assert store.contact(A).host == "10.0.0.1"
+    assert [m.text for m in store.messages(A)] == ["m1"]
+    assert store.set_avatar(A, JPEG)
+    assert store._db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 4
+
+
+def test_history_from_fork_3_8_is_upgraded(tmp_path):
+    """Historique d'une 3.4 à 3.8 (schéma 3 = photo de profil, sans les clés de la 4.0)."""
+    path = tmp_path / "h.sqlite3"
+    old = Store(path)
+    old.upsert_contact(A, "Alice")
+    old.set_avatar(A, JPEG)
+    old.add_message(msg(1))
+    old.close()
+    db = sqlite3.connect(path)
+    db.executescript(
+        "ALTER TABLE contacts DROP COLUMN public_key; ALTER TABLE contacts DROP COLUMN "
+        "pending_key; DROP TABLE meta; PRAGMA user_version = 3;"
+    )
+    db.close()
+
+    store = Store(path, KEY)
+    summary = store.contacts()[0]
+    assert summary.contact.avatar == JPEG and summary.contact.public_key is None
+    assert summary.last_message.text == "m1"
+    store.pin_key(A, "clé")
+    assert store.contact(A).public_key == "clé"
+    assert store._db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION

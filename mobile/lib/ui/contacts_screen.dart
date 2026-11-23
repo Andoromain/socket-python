@@ -6,6 +6,7 @@ import '../store/store.dart';
 import 'conversation_screen.dart';
 import 'format.dart';
 import 'settings_screen.dart';
+import 'update_banner.dart';
 import 'widgets.dart';
 
 class ContactsScreen extends StatefulWidget {
@@ -109,6 +110,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                   content: Text(notice),
                   actions: [TextButton(onPressed: controller.dismissNotice, child: const Text('OK'))],
                 ),
+              if (controller.updater case final updater?) UpdateBanner(updater: updater),
               if (controller.startError case final error?)
                 MaterialBanner(
                   leading: const Icon(Icons.wifi_off),
@@ -198,7 +200,12 @@ class ContactTile extends StatelessWidget {
       onTap: onTap,
       onLongPress: onLongPress,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      leading: Avatar(name: summary.contact.name, contactId: summary.contact.id, online: online),
+      leading: Avatar(
+        name: summary.contact.name,
+        contactId: summary.contact.id,
+        online: online,
+        photo: summary.contact.avatar,
+      ),
       title: Text(
         summary.contact.name,
         maxLines: 1,

@@ -25,7 +25,14 @@ from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, Qt, Signal
 from PySide6.QtGui import QImage, QPainter
 
 from .network import PeerConnection
-from .protocol import CHUNK_SIZE, MAX_FILE_SIZE, MAX_THUMB_SIZE, Message, MessageType
+from .protocol import (
+    CHUNK_SIZE,
+    MAX_AVATAR_SIZE,
+    MAX_FILE_SIZE,
+    MAX_THUMB_SIZE,
+    Message,
+    MessageType,
+)
 from .store import IMAGE_EXTENSIONS, FileState, Store
 
 log = logging.getLogger(__name__)
@@ -76,6 +83,45 @@ def make_thumbnail(path: str | Path) -> bytes:
             return bytes(data.data())
         side = int(side * 0.8)
     return b""
+
+
+#: Côté d'une photo de profil (pixels).
+AVATAR_SIDE = 256
+
+
+def make_avatar(path: str | Path) -> bytes:
+    """Photo de profil : image recadrée en carré centré, 256 px, JPEG de 32 Kio au plus.
+
+    Lève ``ValueError`` si le fichier n'est pas une image lisible.
+    """
+    image = QImage(str(path))
+    if image.isNull():
+        raise ValueError(f"« {Path(path).name} » n'est pas une image lisible.")
+    side = min(image.width(), image.height())
+    image = image.copy((image.width() - side) // 2, (image.height() - side) // 2, side, side)
+    size = AVATAR_SIDE
+    while size >= 64:
+        scaled = image.scaled(
+            size,
+            size,
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        flat = QImage(scaled.size(), QImage.Format.Format_RGB32)
+        flat.fill(Qt.GlobalColor.white)  # transparence (PNG) sur fond blanc
+        painter = QPainter(flat)
+        painter.drawImage(0, 0, scaled)
+        painter.end()
+        for quality in (85, 70, 55, 40):
+            data = QByteArray()
+            buffer = QBuffer(data)
+            buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+            flat.save(buffer, "JPEG", quality)
+            buffer.close()
+            if 0 < data.size() <= MAX_AVATAR_SIZE:
+                return bytes(data.data())
+        size = int(size * 0.75)
+    raise ValueError("Impossible de réduire cette image.")
 
 
 @dataclass
