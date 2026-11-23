@@ -26,8 +26,8 @@ jobs:
     name: Vérification du tag
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       # Échoue en quelques secondes (avant les constructions) si le tag ne désigne pas
@@ -45,8 +45,8 @@ jobs:
         # Ubuntu 22.04 : glibc plus ancienne => binaire compatible avec davantage de distributions.
         os: [windows-latest, ubuntu-22.04]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -58,7 +58,7 @@ jobs:
         run: choco install innosetup -y --no-progress
       - run: pip install ".[build]"
       - run: python scripts/build.py
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: socket-chat-${{ runner.os }}
           path: |
@@ -80,8 +80,8 @@ jobs:
       run:
         working-directory: mobile
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
@@ -155,7 +155,7 @@ jobs:
             fi
           done
           ls -la ../dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: socket-chat-Android
           path: dist/*.apk
@@ -166,11 +166,11 @@ jobs:
     needs: [build, android]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           pattern: socket-chat-*
@@ -198,7 +198,7 @@ jobs:
           fi
           pip install "cryptography>=42"
           python scripts/sign_manifest.py dist/latest.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-files
           path: |
@@ -212,7 +212,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: release-files
           path: release
