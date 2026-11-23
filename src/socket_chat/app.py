@@ -147,7 +147,6 @@ def main(argv: list[str] | None = None) -> int:
     store, history_warning = open_history(data_dir)
     keys = identity.load_or_create(data_dir / "identity.key")
     messenger = Messenger(store, settings.user_id, settings.name, keys)
-    messenger.set_avatar(settings.avatar)
     allowed_networks = settings.allowed_networks
     if allowed_networks:
         log.info("Réseaux autorisés : %s", ", ".join(map(str, allowed_networks)))

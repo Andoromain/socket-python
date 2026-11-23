@@ -321,15 +321,3 @@ def test_missing_columns_are_repaired(tmp_path):
     assert store.set_reaction("m1", ME, "👍")
     store.pin_key(A, "clé")
     assert store.contact(A).public_key == "clé"
-
-
-def test_contact_avatar():
-    store = Store()
-    store.upsert_contact(A, "Alice")
-    assert store.contact(A).avatar == b""
-    assert store.set_avatar(A, b"\xff\xd8\xffphoto")
-    assert not store.set_avatar(A, b"\xff\xd8\xffphoto")
-    assert store.contact(A).avatar == b"\xff\xd8\xffphoto"
-    assert store.contacts()[0].contact.avatar == b"\xff\xd8\xffphoto"
-    assert store.set_avatar(A, b"")
-    assert store.contact(A).avatar == b""

@@ -108,19 +108,6 @@ class Settings:
         self._store.setValue("update/notified", value)
 
     @property
-    def avatar(self) -> bytes:
-        """Photo de profil (JPEG) envoyée aux contacts ; vide : initiales."""
-        value = self._store.value("user/avatar")
-        return bytes(value.data()) if isinstance(value, QByteArray) else b""
-
-    @avatar.setter
-    def avatar(self, value: bytes) -> None:
-        if value:
-            self._store.setValue("user/avatar", QByteArray(value))
-        else:
-            self._store.remove("user/avatar")
-
-    @property
     def recent_emojis(self) -> list[str]:
         value = self._store.value("emoji/recent", [])
         if isinstance(value, str):

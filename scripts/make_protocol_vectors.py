@@ -86,8 +86,6 @@ VALID = [
     Message.file_chunk(UID, CHUNK_SIZE, bytes(range(256)) * 4),
     Message.file_end(UID, "a" * 64),
     Message.file_cancel(UID, "integrity"),
-    Message.avatar(b"\xff\xd8\xff\xe0photo"),
-    Message.avatar(b""),
     Message.bye("au revoir"),
     Message.bye(),
 ]
@@ -147,10 +145,6 @@ INVALID = [
     _json({"type": "file_end", "id": UID, "sha256": "zz"}),
     _json({"type": "file_end", "id": UID, "sha256": "A" * 64}),
     _json({"type": "file_cancel", "id": UID, "reason": 1}),
-    _json({"type": "avatar", "data": "iVBORw0KGgo="}),  # PNG : JPEG attendu
-    _json({"type": "avatar", "data": "pas du base64!"}),
-    _json({"type": "avatar", "data": "/9j/" + "A" * 50_000}),  # trop grande
-    _json({"type": "avatar"}),
 ]
 
 UNKNOWN = [b'{"type": "sticker", "id": "x"}', b'{"type": "future"}']

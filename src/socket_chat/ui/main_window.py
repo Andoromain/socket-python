@@ -52,8 +52,6 @@ class MainWindow(QMainWindow):
         super().__init__(parent)
         self.settings = settings
         self.messenger = messenger
-        #: Affichage modal des boîtes de dialogue (remplaçable dans les tests).
-        self.exec_dialog = lambda dialog: dialog.exec()
         self.discovery = discovery
         #: Fermer la fenêtre la masque (vrai seulement si une zone de notification existe).
         self.close_to_tray = False
@@ -210,17 +208,13 @@ class MainWindow(QMainWindow):
             close_to_tray=self.settings.close_to_tray,
             tray_available=self.tray_available,
             first_run=first_run,
-            avatar=self.settings.avatar,
-            user_id=self.messenger.user_id,
         )
-        if self.exec_dialog(dialog) != SettingsDialog.DialogCode.Accepted:
+        if dialog.exec() != SettingsDialog.DialogCode.Accepted:
             return False
         port_changed = dialog.port != self.settings.port
         self.settings.name = dialog.name
         self.settings.port = dialog.port
         self.settings.close_to_tray = dialog.close_to_tray
-        self.settings.avatar = dialog.avatar
-        self.messenger.set_avatar(dialog.avatar)
         self.close_to_tray = self.tray_available and dialog.close_to_tray
         self.messenger.name = dialog.name
         if self.discovery is not None:
